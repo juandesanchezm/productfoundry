@@ -1,0 +1,5 @@
+themes:
+  - id: default
+    name: Default Theme
+    description: |
+      Override this file with specific themes for your pack.

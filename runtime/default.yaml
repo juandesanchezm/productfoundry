@@ -1,0 +1,11 @@
+llm:
+  provider: ollama
+  model: deepseek-v4-flash
+  base_url: https://ollama.com
+  api_key_env: OLLAMA_API_KEY
+image:
+  provider: openai
+  model: gpt-image-1
+  api_key_env: OPENAI_API_KEY
+budget:
+  max_cost: 20.0

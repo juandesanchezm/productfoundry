@@ -1,0 +1,5 @@
+digital:
+  page_size: 8.5x11
+print:
+  page_size: 8.5x11
+  bleed_inches: 0.125

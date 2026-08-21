@@ -1,0 +1,25 @@
+themes:
+  - id: dragons
+    name: Dragons
+    description: Dragons in lairs, in flight, breathing fire, hoard-keepers, dragon eggs, wyverns, drakes.
+  - id: dungeons
+    name: Dungeons
+    description: Treasure rooms, dungeon corridors, traps, altars, secret doors, underdark chambers.
+  - id: taverns
+    name: Taverns and towns
+    description: Medieval taverns, adventuring parties, marketplaces, blacksmiths, inns, guild halls.
+  - id: wizards
+    name: Wizards and spellcasters
+    description: Wizards casting spells, alchemy labs, magical libraries, familiars, spellbooks.
+  - id: monsters
+    name: Monsters and creatures
+    description: Beholders, owlbears, minotaurs, goblins, trolls, elementals, magical creatures.
+  - id: undead
+    name: Undead and dark creatures
+    description: Skeletons, liches, vampires, ghosts, haunted locations, gothic crypts.
+  - id: forest
+    name: Enchanted forests
+    description: Ancient trees, druids, forest spirits, magical groves, fairy rings, woodland creatures.
+  - id: sea
+    name: Sea and pirates
+    description: Pirate ships, krakens, sea serpents, treasure islands, port towns, underwater kingdoms.

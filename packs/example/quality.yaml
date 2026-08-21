@@ -1,0 +1,8 @@
+quality:
+  min_asset_size_bytes: 1000
+  required_assets: true
+  required_packages: true
+  checklist:
+    - "all pages have clean black lines on white background"
+    - "no watermarks or text other than the subject"
+    - "page count matches request"

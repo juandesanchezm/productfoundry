@@ -1,0 +1,8 @@
+llm:
+  provider: placeholder
+  model: placeholder
+image:
+  provider: placeholder
+  model: placeholder
+budget:
+  max_cost: 0.0

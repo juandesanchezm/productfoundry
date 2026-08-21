@@ -1,0 +1,18 @@
+id: example
+schema_version: 1
+pack_version: 1
+pack_type: coloring
+default_language: en
+languages:
+  - en
+  - es
+formats:
+  digital:
+    marketplaces:
+      - etsy
+      - gumroad
+  print:
+    marketplaces:
+      - kdp
+page_count: 30
+image_size: 1024x1024

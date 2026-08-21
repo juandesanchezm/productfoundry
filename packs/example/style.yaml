@@ -1,0 +1,3 @@
+style:
+  positive_prompt_suffix: "black and white line art, coloring book page, clean lines, white background, no shading, no color, high contrast, printable"
+  negative_prompt_suffix: "color, gradient, shading, 3d, photo, realistic, blurry, watermarks, text other than the subject"

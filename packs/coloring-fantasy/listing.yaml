@@ -1,0 +1,15 @@
+listing:
+  tone: evocative, fantasy-flavored
+  audience: "adults and teens who enjoy fantasy, TTRPG players, stress relief"
+  keywords_base:
+    - "coloring book"
+    - "fantasy"
+    - "adult coloring"
+    - "printable"
+  max_title_chars: 140
+  max_description_words: 400
+  min_tags: 10
+  default_prices:
+    etsy_digital: 4.99
+    gumroad_digital: 5.00
+    kdp_print: 8.99

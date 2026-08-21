@@ -1,0 +1,11 @@
+quality:
+  min_asset_size_bytes: 2000
+  required_assets: true
+  required_packages: true
+  checklist:
+    - "all pages have clean black lines on white background"
+    - "no watermarks, signatures, or text other than the subject"
+    - "each page is a single illustration (no collage)"
+    - "page count matches request"
+    - "listings include at least 10 tags"
+    - "all titles under 140 characters"
