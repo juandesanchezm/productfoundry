@@ -10,6 +10,7 @@ class Listing(BaseModel):
     tags: list[str] = Field(default_factory=list)
     price: float = 0.0
     category: str = ""
+    ai_disclosure: str = ""
 
 
 class ListingSet(BaseModel):

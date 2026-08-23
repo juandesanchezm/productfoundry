@@ -96,14 +96,33 @@ class PlaceholderLLMClient:
     """Deterministic stub LLM for tests and offline smoke runs.
 
     Returns a small canned JSON response that satisfies the concept and listing
-    schemas. Ignores all prompt content.
+    schemas. Ignores all prompt content. The main character id is read from
+    the pack roster (never hardcoded) so the engine stays agnostic.
     """
 
-    def __init__(self, schema_hint: str = "concept") -> None:
+    def __init__(self, schema_hint: str = "concept", pack=None) -> None:
         self.schema_hint = schema_hint
+        self._main_id = ""
+        if pack is not None:
+            stories = getattr(pack, "stories", None) or {}
+            roster = stories.get("characters", []) if isinstance(stories, dict) else []
+            for c in roster:
+                if isinstance(c, dict) and c.get("role") == "main" and c.get("id"):
+                    self._main_id = c["id"]
+                    break
 
     def complete(self, system: str, user: str) -> LLMResponse:
-        if "listing" in self.schema_hint or "listings" in user.lower():
+        if "Audit each prompt" in user or "storytelling judge" in user.lower():
+            # Prompt audit: one ok verdict per prompt line
+            import re
+
+            count = len(re.findall(r'"id":\s*"page_', user)) or 1
+            payload = {
+                "verdicts": [
+                    {"status": "ok", "notes": "", "rewrite_suggestion": ""} for _ in range(count)
+                ]
+            }
+        elif "listing" in self.schema_hint or "listings" in user.lower():
             payload = {
                 "listings": [
                     {
@@ -129,6 +148,11 @@ class PlaceholderLLMClient:
                 ]
             }
         else:
+            import re
+
+            m = re.search(r"Número de páginas:\s*(\d+)", user)
+            count = int(m.group(1)) if m else 3
+            main_id = self._main_id or "main"
             payload = {
                 "pages": [
                     {
@@ -136,11 +160,17 @@ class PlaceholderLLMClient:
                         "index": i + 1,
                         "prompt": f"placeholder page {i + 1}",
                         "title": f"Page {i + 1}",
+                        "characters": [main_id],
                     }
-                    for i in range(3)
+                    for i in range(count)
                 ],
                 "titles": {"en": "Placeholder EN", "es": "Placeholder ES"},
                 "subtitle": "placeholder subtitle",
                 "description_hint": "placeholder description hint",
             }
+        return LLMResponse(content=json.dumps(payload), raw={"prompt_eval_count": 1, "eval_count": 1})
+
+    def complete_with_image(self, system: str, user: str, image_b64: str, model: str | None = None) -> LLMResponse:
+        """Vision stub: always approves (used by the smoke runtime)."""
+        payload = {"status": "ok", "notes": "", "rewrite_suggestion": ""}
         return LLMResponse(content=json.dumps(payload), raw={"prompt_eval_count": 1, "eval_count": 1})

@@ -31,3 +31,6 @@ class ImageGenerationRequest(BaseModel):
     aspect_ratio: str = "1:1"
     size: str = "1024x1024"
     quality: str = "high"
+    output_format: str = "png"  # png | jpeg | webp
+    reference_image: bytes | None = None  # image-to-image reference (character consistency)
+    reference_images: list[bytes] | None = None  # multiple references (per-character sheets)

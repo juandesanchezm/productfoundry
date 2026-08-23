@@ -11,6 +11,7 @@ StageStatus = Literal["pending", "running", "done", "failed"]
 class NodeRecord(BaseModel):
     name: str
     status: StageStatus
+    attempts: int = 0
     input_hash: str = ""
     output_path: str = ""
     cost: float = 0.0
@@ -24,6 +25,7 @@ class ProductState(BaseModel):
     pack_id: str
     pack_version: int
     request: dict
+    runtime_path: str = ""  # runtime profile used for this product (for resume/release)
     nodes: dict[str, NodeRecord] = Field(default_factory=dict)
 
     def save(self, project_dir: Path) -> None:

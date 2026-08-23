@@ -19,6 +19,15 @@ def _check_assets(plan: AssetPlan, processed_dir: Path) -> list[ReviewIssue]:
     issues: list[ReviewIssue] = []
     for a in plan.assets:
         path = processed_dir / f"{a.id}.png"
+        if a.audit_status == "fail":
+            issues.append(
+                ReviewIssue(
+                    criterion="asset_audit",
+                    severity="error",
+                    detail=f"asset failed the judge and was excluded: {a.id} — {a.audit_notes}",
+                )
+            )
+            continue
         if not path.exists():
             issues.append(
                 ReviewIssue(
@@ -81,6 +90,7 @@ class ReviewStage(Stage):
         "listings": ListingSet,
     }
     prompt_version = PROMPT_VERSION
+    gate_verdict = "pass"
 
     def run(
         self,

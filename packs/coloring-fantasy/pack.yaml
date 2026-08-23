@@ -1,6 +1,6 @@
 id: coloring-fantasy
 schema_version: 1
-pack_version: 1
+pack_version: 2
 pack_type: coloring
 default_language: en
 languages:
@@ -14,5 +14,10 @@ formats:
   print:
     marketplaces:
       - kdp
-page_count: 30
-image_size: 1024x1024
+page_count: 24
+image_size: 1024x1328
+page_size: 8.5x11
+author: "Juande Sánchez"
+audience: "Parents of kids 3-8 years old"
+age_range: "3-8"
+series_name: "Blaze & Friends"

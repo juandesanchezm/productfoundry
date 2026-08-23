@@ -5,4 +5,4 @@ image:
   provider: placeholder
   model: placeholder
 budget:
-  max_cost: 0.0
+  max_cost: 0.01

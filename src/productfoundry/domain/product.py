@@ -2,13 +2,30 @@
 from pydantic import BaseModel, Field
 
 
+class Character(BaseModel):
+    """A named character in a story. Names are identical across languages
+    (franchise-style, like Coco Wyo / Disney) so the same character can be
+    reused across volumes of a series."""
+
+    id: str
+    role: str = "supporting"  # main | supporting
+    name_en: str = ""
+    name_es: str = ""
+    archetype_en: str = ""
+    archetype_es: str = ""
+    description_en: str = ""
+    description_es: str = ""
+
+
 class ProductRequest(BaseModel):
     pack: str
     theme: str
-    page_count: int = 30
+    page_count: int = 24
     languages: list[str] = Field(default_factory=lambda: ["en", "es"])
     formats: list[str] = Field(default_factory=lambda: ["digital", "print"])
     title_hint: str = ""
+    story_id: str = ""  # optional: look up in pack.stories
+    character: str = ""  # freeform protagonist descriptor for character consistency
 
 
 class PageSpec(BaseModel):
@@ -17,6 +34,10 @@ class PageSpec(BaseModel):
     prompt: str
     title: str = ""
     theme: str = ""
+    beat: str = ""  # narrative beat (when in story mode)
+    characters: list[str] = Field(default_factory=list)  # roster IDs present on this page
+    audit_status: str = "pending"  # pending | ok | warn | fail
+    audit_notes: str = ""
 
 
 class ProductPlan(BaseModel):

@@ -1,0 +1,7 @@
+audit:
+  enabled: true
+  judge_model: minimax-m3
+  prompt:
+    fail_on: [multiple figures, hands holding complex objects, multiple faces]
+  image:
+    fail_on: [extra limbs, subject cropped, mostly blank image]

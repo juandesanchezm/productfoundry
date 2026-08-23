@@ -1,7 +1,9 @@
 """Pack loader — reads YAML pack packs from disk and validates them."""
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
+
 import yaml
 
 from productfoundry.domain.pack import PackProfile
@@ -19,6 +21,9 @@ class Pack:
     packaging: dict = field(default_factory=dict)
     listing: dict = field(default_factory=dict)
     quality: dict = field(default_factory=dict)
+    audit: dict = field(default_factory=dict)
+    stories: dict = field(default_factory=dict)
+    compliance: dict = field(default_factory=dict)
 
 
 def _read_yaml(path: Path) -> dict:
@@ -41,7 +46,7 @@ def load_pack(pack_dir: Path) -> Pack:
     except Exception as e:
         raise PackError(f"invalid pack profile: {e}") from e
 
-    aux_files = ("style", "themes", "packaging", "listing", "quality")
+    aux_files = ("style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance")
     aux: dict[str, dict] = {}
     for name in aux_files:
         path = pack_dir / f"{name}.yaml"

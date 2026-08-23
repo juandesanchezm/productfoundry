@@ -5,7 +5,14 @@ llm:
   api_key_env: OLLAMA_API_KEY
 image:
   provider: openai
-  model: gpt-image-1
+  model: gpt-image-2
   api_key_env: OPENAI_API_KEY
+image_policies:
+  interior:
+    attempts: [low, low, medium]
+  character_sheet:
+    attempts: [medium, medium, high]
+  cover:
+    attempts: [high, high, high]
 budget:
   max_cost: 20.0

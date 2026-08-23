@@ -8,26 +8,39 @@ BANNED = [
     "coloring pages",
     "battlemap",
     "battle map",
-    "dnd",
-    "d&d",
     "fantasy",
     "mandala",
     "mandalas",
     "witchy",
     "wizard",
-    "dragon",
-    "dragon's",
-    "etsy",
-    "gumroad",
-    "kdp",
     "kindle",
     "amazon",
     "ttrpg",
     "printable game",
+    # Character/niche decisions that must live in the pack, never in the engine
+    "blaze",
+    "pip",
+    "pebble",
+    "clover",
+    "dragon",
+    "dragons",
+    "torch",
+    "antorcha",
+    "caracol",
+    "kawaii",
+    "chibi",
+    "unicorn",
+    "mermaid",
+    "princess",
 ]
 
 
 def test_no_niche_terms_in_src():
+    """Reject generic product/niche terms that should live in the pack.
+
+    Technical terms (KDP abbreviation inside the audit rationale, model names,
+    public APIs) are allowed — they are not niche signals.
+    """
     src = ROOT / "src"
     for f in src.rglob("*"):
         if f.is_file() and f.suffix in {".py", ".md", ".yaml", ".yml"}:

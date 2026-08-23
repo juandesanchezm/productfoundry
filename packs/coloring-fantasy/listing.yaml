@@ -1,11 +1,14 @@
 listing:
-  tone: evocative, fantasy-flavored
-  audience: "adults and teens who enjoy fantasy, TTRPG players, stress relief"
+  audience: "Parents of kids 3-8 years old"
+  tone: "warm, playful, kawaii"
   keywords_base:
-    - "coloring book"
-    - "fantasy"
-    - "adult coloring"
-    - "printable"
+    - "coloring book for kids"
+    - "kawaii"
+    - "baby dragon"
+    - "toddler coloring"
+    - "chibi"
+    - "cute coloring book"
+    - "kids activity book"
   max_title_chars: 140
   max_description_words: 400
   min_tags: 10

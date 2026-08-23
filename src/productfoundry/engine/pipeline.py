@@ -23,11 +23,20 @@ from productfoundry.runtime import RuntimeProfile
 
 PIPELINE_ORDER: list[str] = [
     "concept",
+    "audit_prompt",
+    "pack_validate",
+    "character_sheet",
+    "audit_character_sheet",
     "assets",
+    "audit_assets",
     "postprocess",
+    "lineart_check",
+    "hero",
     "package",
+    "printcheck",
     "listing",
     "review",
+    "release",
 ]
 
 
@@ -44,6 +53,24 @@ class LLMClient:
         ]
         return ollama_chat(self.base_url, self.model, messages, api_key=self.api_key, format_json=True)
 
+    def complete_with_image(self, system: str, user: str, image_b64: str, model: str | None = None) -> LLMResponse:
+        """Vision-capable completion. Sends the image as base64 to the Ollama chat endpoint.
+
+        `model` overrides the default chat model so the judge can use a vision-capable one
+        (e.g. minimax-m3) even when the main chat model is text-only.
+        """
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user, "images": [image_b64]},
+        ]
+        return ollama_chat(
+            self.base_url,
+            model or self.model,
+            messages,
+            api_key=self.api_key,
+            format_json=False,
+        )
+
 
 def build_image_provider(runtime: RuntimeProfile) -> ImageProvider:
     if runtime.image.provider == "openai":
@@ -53,9 +80,14 @@ def build_image_provider(runtime: RuntimeProfile) -> ImageProvider:
             api_key=os.getenv(runtime.image.api_key_env or "OPENAI_API_KEY", ""),
             model=runtime.image.model,
         )
-    from productfoundry.providers.image import PlaceholderImageProvider
+    if runtime.image.provider == "placeholder":
+        from productfoundry.providers.image import PlaceholderImageProvider
 
-    return PlaceholderImageProvider()
+        return PlaceholderImageProvider()
+    raise RuntimeError(
+        f"unknown image provider: {runtime.image.provider!r} "
+        f"(supported: openai, placeholder)"
+    )
 
 
 @dataclass
@@ -68,6 +100,7 @@ class StageContext:
     image_provider: ImageProvider
     artifacts: dict[str, ArtifactEnvelope] = field(default_factory=dict)
     _cost: float = 0.0
+    product_id: str = ""
 
     @property
     def artifacts_dir(self) -> Path:
@@ -118,9 +151,41 @@ class Stage(ABC):
     prompt_version: str = ""
     input_models: dict[str, type[BaseModel]] = {}
     provider_key: str = "llm"
+    # Optional fail-closed gate: when set, the executor inspects the stage's
+    # output artifact for a verdict field and fails the pipeline unless it is
+    # exactly "pass" (or "ok"). A missing verdict field also fails.
+    gate_verdict: str | None = None
 
     @abstractmethod
     def run(self, ctx: StageContext, **inputs: BaseModel) -> BaseModel: ...
+
+    def output_files(self, ctx: StageContext) -> list[Path]:
+        """Physical files this stage produces (besides artifact JSONs).
+
+        A cache hit requires every returned file to exist and be non-empty;
+        stale or missing files force the stage to re-run. Stages that only
+        produce JSON artifacts can leave this empty.
+
+        Override `expected_output_files` instead when the set of output paths
+        is known before the stage runs (recommended for deterministic stages).
+        """
+        return []
+
+    def expected_output_files(self, ctx: StageContext) -> list[Path] | None:
+        """Physical files this stage WILL produce, declared before running.
+
+        When returning a non-None list, the executor validates that every
+        path exists and is non-empty — even if the glob in `output_files`
+        returns fewer results. Return None to fall back to `output_files`.
+        """
+        return None
+
+    def extra_hash_inputs(self, ctx: StageContext) -> list[str]:
+        """Extra inputs folded into the node hash (e.g. approval markers).
+
+        A change in any returned value invalidates the node's cache entry.
+        """
+        return []
 
 
 class PipelineExecutor:
@@ -134,6 +199,7 @@ class PipelineExecutor:
         pack: Pack,
         request: ProductRequest,
         product_id: str,
+        runtime_path: str = "",
     ) -> ProductState:
         project_dir.mkdir(parents=True, exist_ok=True)
         state_path = project_dir / "product.json"
@@ -147,17 +213,23 @@ class PipelineExecutor:
                 request=request.model_dump(),
             )
         state.request = request.model_dump()
+        state.runtime_path = runtime_path
 
         llm: LLMClient
         if runtime.llm.provider == "placeholder":
             from productfoundry.providers.llm import PlaceholderLLMClient
 
-            llm = PlaceholderLLMClient()
-        else:
+            llm = PlaceholderLLMClient(pack=pack)
+        elif runtime.llm.provider == "ollama":
             llm = LLMClient(
                 base_url=runtime.llm.base_url,
                 model=runtime.llm.model,
                 api_key=os.getenv(runtime.llm.api_key_env or "OLLAMA_API_KEY", ""),
+            )
+        else:
+            raise RuntimeError(
+                f"unknown llm provider: {runtime.llm.provider!r} "
+                f"(supported: ollama, placeholder)"
             )
         image_provider = build_image_provider(runtime)
         ctx = StageContext(
@@ -167,12 +239,22 @@ class PipelineExecutor:
             request=request,
             llm=llm,
             image_provider=image_provider,
+            product_id=product_id,
         )
         _preload_artifacts(ctx)
 
         config_hash = sha256_json(
             {
                 "pack": pack.profile.model_dump(),
+                # Auxiliary pack files (style, stories, audit, packaging, ...)
+                # are inputs to the stages; a change in any of them must
+                # invalidate every node that consumes them.
+                "pack_aux": {
+                    name: getattr(pack, name)
+                    for name in (
+                        "style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance"
+                    )
+                },
                 "runtime": runtime.model_dump(),
                 "request": request.model_dump(),
             }
@@ -202,14 +284,51 @@ class PipelineExecutor:
                 stage.prompt_version,
                 config_hash,
                 input_hashes,
+                # Provider implementations are inputs too: a change in the LLM
+                # or image provider code must invalidate every node that uses it.
+                sha256_text(
+                    inspect.getsource(importlib.import_module("productfoundry.providers.llm"))
+                    + inspect.getsource(importlib.import_module("productfoundry.providers.image"))
+                ),
+                # Stage-specific extra inputs (e.g. the human approval marker).
+                sha256_text("|".join(stage.extra_hash_inputs(ctx))),
             )
 
             node = state.nodes.get(stage_name)
             if node is not None and node.status == "done" and node.input_hash == node_hash:
-                if all((ctx.artifacts_dir / f"{output_name}.json").exists() for output_name in stage.outputs):
-                    continue
+                artifacts_ok = all(
+                    (ctx.artifacts_dir / f"{output_name}.json").exists() for output_name in stage.outputs
+                )
+                expected = stage.expected_output_files(ctx)
+                check_files = expected if expected is not None else stage.output_files(ctx)
+                files_ok = all(p.exists() and p.stat().st_size > 0 for p in check_files)
+                if artifacts_ok and files_ok:
+                    # Revalidate gate on cache-hit: a tampered artifact that no
+                    # longer carries the expected verdict must not be trusted.
+                    if stage.gate_verdict is not None:
+                        gate_ok = True
+                        for output_name in stage.outputs:
+                            env = ctx.get_artifact(output_name)
+                            verdict = env.artifact.get("verdict") if env else None
+                            if verdict != stage.gate_verdict:
+                                gate_ok = False
+                                break
+                        if gate_ok:
+                            continue
+                    else:
+                        continue
                 node.status = "pending"
                 node.input_hash = ""
+                # Clean stale outputs before re-running so the stage starts fresh
+                for output_name in stage.outputs:
+                    stale = ctx.artifacts_dir / f"{output_name}.json"
+                    if stale.exists():
+                        stale.unlink()
+                expected_clean = stage.expected_output_files(ctx)
+                clean_files = expected_clean if expected_clean is not None else stage.output_files(ctx)
+                for stale_file in clean_files:
+                    if stale_file.exists():
+                        stale_file.unlink()
 
             now = datetime.now(timezone.utc).isoformat()
             if node is None:
@@ -219,7 +338,11 @@ class PipelineExecutor:
             node.status = "running"
             node.updated_at = now
             node.error = ""
+            node.attempts += 1
             state.nodes[stage_name] = node
+            # Persist the running marker before provider calls so resume can
+            # deterministically continue from this stage after interruption.
+            state.save(project_dir)
 
             try:
                 before = ctx.cost_total()
@@ -232,6 +355,17 @@ class PipelineExecutor:
                 state.nodes[stage_name] = node
                 state.save(project_dir)
                 raise
+
+            if ctx.cost_total() > runtime.budget.max_cost:
+                node.status = "failed"
+                node.error = (
+                    f"budget exceeded: spent ${ctx.cost_total():.4f} > "
+                    f"max ${runtime.budget.max_cost:.2f}"
+                )
+                node.updated_at = datetime.now(timezone.utc).isoformat()
+                state.nodes[stage_name] = node
+                state.save(project_dir)
+                raise RuntimeError(node.error)
 
             node.status = "done"
             node.input_hash = node_hash
@@ -257,6 +391,27 @@ class PipelineExecutor:
                 ctx.artifacts[output_name] = envelope
                 node.output_path = str(output_path.relative_to(project_dir))
             dirty = True
+
+            # Fail-closed gate: a stage that declares `gate_verdict` blocks the
+            # pipeline unless its output artifact carries exactly that verdict.
+            # A missing verdict field is a failure, never a pass.
+            if stage.gate_verdict is not None:
+                gate_failures: list[str] = []
+                for output_name in stage.outputs:
+                    env = ctx.get_artifact(output_name)
+                    if env is None:
+                        gate_failures.append(f"{output_name}: missing artifact")
+                        continue
+                    verdict = env.artifact.get("verdict")
+                    if verdict != stage.gate_verdict:
+                        gate_failures.append(f"{output_name}: verdict={verdict!r} (expected {stage.gate_verdict!r})")
+                if gate_failures:
+                    node.status = "failed"
+                    node.error = "gate failed: " + "; ".join(gate_failures)
+                    node.updated_at = datetime.now(timezone.utc).isoformat()
+                    state.nodes[stage_name] = node
+                    state.save(project_dir)
+                    raise RuntimeError(node.error)
 
         if dirty:
             state.save(project_dir)
