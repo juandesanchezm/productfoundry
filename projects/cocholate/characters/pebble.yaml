@@ -1,0 +1,14 @@
+id: pebble
+role: supporting
+name_en: Pebble
+name_es: Pebble
+archetype_en: "tiny pink snail"
+archetype_es: "caracol rosa diminuto"
+description_en: >
+  Pebble, a tiny pink snail with a round spiral shell, curved antennae,
+  a small happy face, and a soft squishy body. Moves slowly and smiles a lot.
+description_es: >
+  Pebble, un caracol rosa diminuto con caparazón redondo en espiral,
+  antenas curvadas, carita feliz y cuerpo suave y blandito. Se mueve
+  despacio y sonríe mucho.
+reference_image: pebble.png

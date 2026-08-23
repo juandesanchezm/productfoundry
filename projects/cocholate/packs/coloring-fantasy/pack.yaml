@@ -1,6 +1,6 @@
 id: coloring-fantasy
 schema_version: 1
-pack_version: 2
+pack_version: 4
 pack_type: coloring
 default_language: en
 languages:
@@ -17,7 +17,9 @@ formats:
 page_count: 24
 image_size: 1024x1328
 page_size: 8.5x11
-author: "Juande Sánchez"
+author: "Noa Bloom"
 audience: "Parents of kids 3-8 years old"
 age_range: "3-8"
-series_name: "Blaze & Friends"
+series_name:
+  en: "Cocholate's Adventures"
+  es: "Las Aventuras de Cocholate"

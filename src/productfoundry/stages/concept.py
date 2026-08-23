@@ -1,12 +1,14 @@
 """concept stage — expand pack themes into a ProductPlan with per-page prompts and titles."""
 from __future__ import annotations
+
+from typing import ClassVar
+
 from pydantic import BaseModel
 
 from productfoundry.domain.bible import normalize_character_ids
 from productfoundry.domain.product import PageSpec, ProductPlan, ProductRequest
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.stages.helpers import estimate_cost, retry_parse
-
 
 PROMPT_VERSION = "concept-v3"
 _SYSTEM = "Eres un generador de planes de producto para packs digitales. Genera SOLO JSON."
@@ -196,8 +198,8 @@ def _slug(pack_id: str, theme: str) -> str:
 
 class ConceptStage(Stage):
     stage_name = "concept"
-    inputs = []
-    outputs = ["concept"]
+    inputs: ClassVar = []
+    outputs: ClassVar = ["concept"]
     prompt_version = PROMPT_VERSION
 
     def run(self, ctx: StageContext, **inputs: BaseModel) -> ProductPlan:

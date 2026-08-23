@@ -1,7 +1,6 @@
 """PackProfile — niche configuration for a product category."""
 from pydantic import BaseModel, Field
 
-
 FormatType = str  # e.g. "digital", "print" — freeform, declared per pack
 Marketplace = str  # freeform marketplace identifier declared by the pack
 
@@ -26,10 +25,10 @@ class PackProfile(BaseModel):
     page_count: int = 24
     image_size: str = "1024x1024"
     page_size: str = "8.5x8.5"  # trim size in inches (WxH), e.g. "8.5x8.5"
-    author: str = "Juande Sánchez"  # author shown on cover and spine
+    author: str = "Juande Sánchez"  # author shown on cover
     audience: str = ""  # freeform description of the target audience
     age_range: str = ""  # e.g. "3-8" — shown as "Ages 3-8" badge on the cover
-    series_name: str = ""  # franchise branding across volumes (declared per pack)
+    series_name: str | dict[str, str] = ""  # franchise branding: plain string or {lang: name} mapping
 
 
 def derive_generation_size(page_size: str, base_px: int = 1024) -> str:
@@ -43,15 +42,15 @@ def derive_generation_size(page_size: str, base_px: int = 1024) -> str:
     """
     try:
         w_in, h_in = map(float, page_size.lower().split("x"))
-    except Exception:
+    except ValueError:
         return f"{base_px}x{base_px}"
     ratio = w_in / h_in
     if ratio >= 1.0:
         gen_w = base_px
-        gen_h = int(round(base_px / ratio / 16)) * 16
+        gen_h = round(base_px / ratio / 16) * 16
     else:
         gen_h = base_px
-        gen_w = int(round(base_px * ratio / 16)) * 16
+        gen_w = round(base_px * ratio / 16) * 16
     gen_w = max(16, gen_w)
     gen_h = max(16, gen_h)
     return f"{gen_w}x{gen_h}"

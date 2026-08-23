@@ -1,0 +1,15 @@
+id: pip
+role: supporting
+name_en: Pip
+name_es: Pip
+archetype_en: "tiny yellow baby bird"
+archetype_es: "pajarito amarillo bebé"
+description_en: >
+  Pip, a tiny round yellow baby bird with a big head, short stubby beak,
+  fluffy downy body, tiny wings, and big round eyes. Often perched on
+  Cocholate's head or flying nearby.
+description_es: >
+  Pip, un pajarito amarillo bebé redondo y diminuto con cabeza grande,
+  pico corto y rechoncho, cuerpo de plumón suave, alitas pequeñas y ojos
+  grandes y redondos. Suele posarse en la cabeza de Cocholate o volar cerca.
+reference_image: pip.png

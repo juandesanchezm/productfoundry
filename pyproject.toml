@@ -33,7 +33,7 @@ build-backend = "hatchling.build"
 packages = ["src/productfoundry"]
 
 [tool.hatch.build]
-include = ["src/productfoundry/**", "runtime/**", "packs/**", "assets/**"]
+include = ["src/productfoundry/**", "runtime/**", "assets/**", "projects/*/characters/**", "projects/*/packs/**", "projects/*/series/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -42,3 +42,8 @@ addopts = "--import-mode=importlib"
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# Typer requires `typer.Option(...)` in argument defaults (B008) and the CLI
+# entry points must surface any provider/pipeline error to the user (BLE001).
+"src/productfoundry/cli.py" = ["B008", "BLE001"]

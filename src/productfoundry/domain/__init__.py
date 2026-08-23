@@ -15,8 +15,8 @@ from productfoundry.domain.bible import (
 __all__ = [
     "AssetAuditReport",
     "AuditVerdict",
-    "PromptAuditReport",
     "CharacterBible",
+    "PromptAuditReport",
     "build_character_bible",
     "validate_character_bible",
     "validate_page_plan",

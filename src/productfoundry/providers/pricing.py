@@ -66,7 +66,7 @@ def _interpolate_cost(quality_table: dict[str, float], size: str) -> float:
     """Approximate cost for a flexible-resolution size by nearest known size."""
     try:
         w, h = map(int, size.split("x"))
-    except Exception:
+    except ValueError:
         raise ValueError(f"cannot parse size {size!r}")
     total_px = w * h
     best_cost = 0.0

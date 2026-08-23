@@ -1,5 +1,6 @@
 """Stage helpers — retry parse, cost estimation."""
 from __future__ import annotations
+
 from pydantic import BaseModel, ValidationError
 
 from productfoundry.providers import LLMResponse

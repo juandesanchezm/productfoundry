@@ -13,7 +13,11 @@ htmlcov/
 .coverage
 
 # Runtime
-projects/
+# Franchise catalogs live under projects/<franchise>/ and ARE versioned
+# (characters, packs, series, books). Only generated edition outputs and
+# legacy non-franchise outputs are ignored.
+projects/*/series/*/books/*/editions/
+projects/legacy/
 .runtime/
 
 # Secrets

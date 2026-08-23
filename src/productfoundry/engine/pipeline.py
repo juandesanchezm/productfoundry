@@ -1,12 +1,14 @@
 """Pipeline executor — DAG-based stage runner with content-hash caching."""
 from __future__ import annotations
+
 import importlib
 import inspect
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import BaseModel
 
@@ -20,7 +22,6 @@ from productfoundry.providers import ImageProvider, LLMResponse
 from productfoundry.providers.llm import ollama_chat
 from productfoundry.runtime import RuntimeProfile
 
-
 PIPELINE_ORDER: list[str] = [
     "concept",
     "audit_prompt",
@@ -32,6 +33,7 @@ PIPELINE_ORDER: list[str] = [
     "postprocess",
     "lineart_check",
     "hero",
+    "back_cover",
     "package",
     "printcheck",
     "listing",
@@ -146,10 +148,10 @@ class StageContext:
 
 class Stage(ABC):
     stage_name: str = ""
-    inputs: list[str] = []
-    outputs: list[str] = []
+    inputs: ClassVar[list[str]] = []
+    outputs: ClassVar[list[str]] = []
     prompt_version: str = ""
-    input_models: dict[str, type[BaseModel]] = {}
+    input_models: ClassVar[dict[str, type[BaseModel]]] = {}
     provider_key: str = "llm"
     # Optional fail-closed gate: when set, the executor inspects the stage's
     # output artifact for a verdict field and fails the pipeline unless it is
@@ -252,8 +254,8 @@ class PipelineExecutor:
                 "pack_aux": {
                     name: getattr(pack, name)
                     for name in (
-                        "style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance"
-                    )
+                        "style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance",
+                )
                 },
                 "runtime": runtime.model_dump(),
                 "request": request.model_dump(),
@@ -274,7 +276,7 @@ class PipelineExecutor:
                     node = NodeRecord(name=stage_name, status="failed")
                 node.status = "failed"
                 node.error = str(e)
-                node.updated_at = datetime.now(timezone.utc).isoformat()
+                node.updated_at = datetime.now(UTC).isoformat()
                 state.nodes[stage_name] = node
                 state.save(project_dir)
                 raise
@@ -330,7 +332,7 @@ class PipelineExecutor:
                     if stale_file.exists():
                         stale_file.unlink()
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             if node is None:
                 node = NodeRecord(name=stage_name, status="pending")
             if not node.created_at:
@@ -351,7 +353,7 @@ class PipelineExecutor:
             except Exception as e:
                 node.status = "failed"
                 node.error = repr(e)
-                node.updated_at = datetime.now(timezone.utc).isoformat()
+                node.updated_at = datetime.now(UTC).isoformat()
                 state.nodes[stage_name] = node
                 state.save(project_dir)
                 raise
@@ -362,14 +364,14 @@ class PipelineExecutor:
                     f"budget exceeded: spent ${ctx.cost_total():.4f} > "
                     f"max ${runtime.budget.max_cost:.2f}"
                 )
-                node.updated_at = datetime.now(timezone.utc).isoformat()
+                node.updated_at = datetime.now(UTC).isoformat()
                 state.nodes[stage_name] = node
                 state.save(project_dir)
                 raise RuntimeError(node.error)
 
             node.status = "done"
             node.input_hash = node_hash
-            node.updated_at = datetime.now(timezone.utc).isoformat()
+            node.updated_at = datetime.now(UTC).isoformat()
             state.nodes[stage_name] = node
 
             for output_name in stage.outputs:
@@ -408,7 +410,7 @@ class PipelineExecutor:
                 if gate_failures:
                     node.status = "failed"
                     node.error = "gate failed: " + "; ".join(gate_failures)
-                    node.updated_at = datetime.now(timezone.utc).isoformat()
+                    node.updated_at = datetime.now(UTC).isoformat()
                     state.nodes[stage_name] = node
                     state.save(project_dir)
                     raise RuntimeError(node.error)
@@ -416,6 +418,24 @@ class PipelineExecutor:
         if dirty:
             state.save(project_dir)
         return state
+
+
+def start_from_stage(state, stage_name: str) -> None:
+    """Invalidate a stage and everything after it (keeps earlier nodes done).
+
+    Used by `resume --start-at` to regenerate a suffix of the pipeline
+    (e.g. hero + back_cover + package) without touching earlier nodes.
+    """
+    names = list(PIPELINE_ORDER)
+    if stage_name not in names:
+        raise ValueError(f"unknown stage {stage_name!r}")
+    start_idx = names.index(stage_name)
+    for name in names[start_idx:]:
+        node = state.nodes.get(name)
+        if node is None:
+            continue
+        node.status = "pending"
+        node.input_hash = ""
 
 
 def _load_inputs(ctx: StageContext, stage: Stage) -> tuple[dict[str, BaseModel], list[str]]:

@@ -6,7 +6,10 @@ changes (new hash), the processed file is regenerated — a stale processed
 file can never survive a source change.
 """
 from __future__ import annotations
+
+import math
 from pathlib import Path
+from typing import ClassVar
 
 from PIL import Image, ImageOps
 
@@ -14,8 +17,8 @@ from productfoundry.domain.assets import AssetPlan
 from productfoundry.engine.hashing import sha256_files
 from productfoundry.engine.pipeline import Stage, StageContext
 
-
-PROMPT_VERSION = "postprocess-v2"
+PROMPT_VERSION = "postprocess-v4"
+INK_MARGIN_RATIO = 0.05
 
 
 def to_grayscale_and_threshold(
@@ -27,7 +30,8 @@ def to_grayscale_and_threshold(
     target_height_inches: float | None = None,
 ) -> Path:
     """Open image, convert to grayscale, normalize contrast, threshold to clean B/W,
-    and upscale to print resolution while preserving aspect ratio.
+    and upscale to print resolution while preserving aspect ratio. Ink is then
+    fitted inside a uniform five-percent canvas margin.
 
     If target_height_inches is provided, the target dimensions are
     (target_inches x target_height_inches). Otherwise, the source's
@@ -42,19 +46,38 @@ def to_grayscale_and_threshold(
         bw = im.point(lambda p: 255 if p > threshold else 0)
         bw = bw.convert("L")
         if target_height_inches is not None:
-            target_w = int(round(target_inches * target_dpi))
-            target_h = int(round(target_height_inches * target_dpi))
+            target_w = round(target_inches * target_dpi)
+            target_h = round(target_height_inches * target_dpi)
         else:
             src_w, src_h = bw.size
             if src_w >= src_h:
-                target_w = int(round(target_inches * target_dpi))
-                target_h = int(round(target_w * src_h / src_w))
+                target_w = round(target_inches * target_dpi)
+                target_h = round(target_w * src_h / src_w)
             else:
-                target_h = int(round(target_inches * target_dpi))
-                target_w = int(round(target_h * src_w / src_h))
+                target_h = round(target_inches * target_dpi)
+                target_w = round(target_h * src_w / src_h)
         if bw.width < target_w or bw.height < target_h:
             bw = bw.resize((target_w, target_h), Image.LANCZOS)
             bw = bw.point(lambda p: 255 if p > threshold else 0)
+        ink = bw.point(lambda p: 255 if p == 0 else 0)
+        bbox = ink.getbbox()
+        if bbox is not None:
+            cropped = bw.crop(bbox)
+            margin_x = math.ceil(target_w * INK_MARGIN_RATIO)
+            margin_y = math.ceil(target_h * INK_MARGIN_RATIO)
+            content_w = max(1, target_w - 2 * margin_x)
+            content_h = max(1, target_h - 2 * margin_y)
+            scale = min(content_w / cropped.width, content_h / cropped.height)
+            fitted_size = (
+                max(1, round(cropped.width * scale)),
+                max(1, round(cropped.height * scale)),
+            )
+            fitted = cropped.resize(fitted_size, Image.LANCZOS)
+            canvas = Image.new("L", (target_w, target_h), 255)
+            canvas.paste(fitted, ((target_w - fitted.width) // 2, (target_h - fitted.height) // 2))
+            # LANCZOS introduces antialiasing while fitting the ink; normalize
+            # again so the line-art gate receives only black and white pixels.
+            bw = canvas.point(lambda p: 255 if p > threshold else 0)
         bw.save(out_path, "PNG", optimize=True)
     return out_path
 
@@ -77,18 +100,19 @@ def process_assets(plan: AssetPlan, assets_dir: Path, processed_dir: Path) -> di
         # it was produced from the current source bytes.
         marker = processed_dir / f".{a.id}.src_hash"
         src_hash = sha256_files([src])
-        if not dst.exists() or not marker.exists() or marker.read_text().strip() != src_hash:
+        marker_value = f"{PROMPT_VERSION}:{src_hash}"
+        if not dst.exists() or not marker.exists() or marker.read_text().strip() != marker_value:
             to_grayscale_and_threshold(src, dst)
-            marker.write_text(src_hash)
+            marker.write_text(marker_value)
         out[a.id] = dst
     return out
 
 
 class PostprocessStage(Stage):
     stage_name = "postprocess"
-    inputs = ["assets"]
-    outputs = ["processed"]
-    input_models = {"assets": AssetPlan}
+    inputs: ClassVar = ["assets"]
+    outputs: ClassVar = ["processed"]
+    input_models: ClassVar = {"assets": AssetPlan}
     prompt_version = PROMPT_VERSION
 
     def output_files(self, ctx: StageContext) -> list[Path]:
@@ -110,7 +134,7 @@ class PostprocessStage(Stage):
         # Derive target dimensions from the pack's trim page_size
         try:
             trim_w_in, trim_h_in = map(float, ctx.pack.profile.page_size.lower().split("x"))
-        except Exception:
+        except ValueError:
             trim_w_in, trim_h_in = 8.0, 8.0
         for a in assets.assets:
             if a.audit_status == "fail":
@@ -124,11 +148,12 @@ class PostprocessStage(Stage):
             dst = ctx.processed_dir / f"{a.id}.png"
             marker = ctx.processed_dir / f".{a.id}.src_hash"
             src_hash = sha256_files([src])
-            if not dst.exists() or not marker.exists() or marker.read_text().strip() != src_hash:
+            marker_value = f"{PROMPT_VERSION}:{src_hash}"
+            if not dst.exists() or not marker.exists() or marker.read_text().strip() != marker_value:
                 to_grayscale_and_threshold(
                     src, dst,
                     target_inches=trim_w_in,
                     target_height_inches=trim_h_in,
                 )
-                marker.write_text(src_hash)
+                marker.write_text(marker_value)
         return assets

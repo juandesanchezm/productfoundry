@@ -1,13 +1,15 @@
 """Provider abstractions."""
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
+
 from pydantic import BaseModel
 
 
 class ImageProvider(ABC):
     @abstractmethod
-    def generate(self, request: "ImageGenerationRequest") -> bytes: ...
+    def generate(self, request: ImageGenerationRequest) -> bytes: ...
 
 
 class TTSService(ABC):
@@ -34,3 +36,4 @@ class ImageGenerationRequest(BaseModel):
     output_format: str = "png"  # png | jpeg | webp
     reference_image: bytes | None = None  # image-to-image reference (character consistency)
     reference_images: list[bytes] | None = None  # multiple references (per-character sheets)
+    usage: dict | None = None  # populated by the provider after the call (token usage)

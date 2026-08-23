@@ -15,6 +15,8 @@ class Character(BaseModel):
     archetype_es: str = ""
     description_en: str = ""
     description_es: str = ""
+    palette_en: str = ""  # canonical colors (e.g. "chocolate brown body, cream belly")
+    palette_es: str = ""
 
 
 class ProductRequest(BaseModel):
@@ -26,6 +28,9 @@ class ProductRequest(BaseModel):
     title_hint: str = ""
     story_id: str = ""  # optional: look up in pack.stories
     character: str = ""  # freeform protagonist descriptor for character consistency
+    franchise: str = ""  # catalog layout: franchise directory (e.g. "cocholate")
+    series: str = ""  # catalog layout: series id inside the franchise
+    book: str = ""  # catalog layout: book id inside the series
 
 
 class PageSpec(BaseModel):

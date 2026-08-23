@@ -14,17 +14,17 @@ page (PageSpec.characters) are passed as image-to-image references — not the
 entire roster, reducing input token cost and improving adherence.
 """
 from __future__ import annotations
+
 from pathlib import Path
+from typing import ClassVar
 
 from productfoundry.domain.assets import AssetPlan, AssetSpec
-from productfoundry.domain.audit import AuditVerdict
 from productfoundry.domain.bible import build_character_bible
 from productfoundry.domain.product import ProductPlan
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.providers import ImageGenerationRequest
 from productfoundry.providers.pricing import image_cost_usd
 from productfoundry.stages.audit import _audit_single_image, _is_audit_enabled
-
 
 PROMPT_VERSION = "assets-v4"
 
@@ -106,7 +106,7 @@ def _generate_one(
     asset: AssetSpec,
     image_provider,
     assets_dir: Path,
-    on_cost: callable = None,
+    on_cost: callable | None = None,
     reference_images: list[bytes] | None = None,
 ) -> Path:
     path = assets_dir / f"{asset.id}.png"
@@ -138,9 +138,9 @@ def _character_design_hash(pack) -> str:
 
 class AssetsStage(Stage):
     stage_name = "assets"
-    inputs = ["concept"]
-    outputs = ["assets"]
-    input_models = {"concept": ProductPlan}
+    inputs: ClassVar = ["concept"]
+    outputs: ClassVar = ["assets"]
+    input_models: ClassVar = {"concept": ProductPlan}
     prompt_version = PROMPT_VERSION
     provider_key = "image"
 

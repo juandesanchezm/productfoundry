@@ -16,6 +16,8 @@ class PackError(Exception):
 @dataclass
 class Pack:
     profile: PackProfile
+    root: Path = field(default_factory=Path)
+    character_root: Path = field(default_factory=Path)
     style: dict = field(default_factory=dict)
     themes: dict = field(default_factory=dict)
     packaging: dict = field(default_factory=dict)
@@ -24,6 +26,8 @@ class Pack:
     audit: dict = field(default_factory=dict)
     stories: dict = field(default_factory=dict)
     compliance: dict = field(default_factory=dict)
+    series: dict = field(default_factory=dict)
+    palettes: dict = field(default_factory=dict)  # franchise-only: {char_id: {"en": ..., "es": ...}}
 
 
 def _read_yaml(path: Path) -> dict:
@@ -46,11 +50,13 @@ def load_pack(pack_dir: Path) -> Pack:
     except Exception as e:
         raise PackError(f"invalid pack profile: {e}") from e
 
-    aux_files = ("style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance")
+    aux_files = (
+        "style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance", "series"
+    )
     aux: dict[str, dict] = {}
     for name in aux_files:
         path = pack_dir / f"{name}.yaml"
         if path.exists():
             aux[name] = _read_yaml(path)
 
-    return Pack(profile=profile, **aux)
+    return Pack(profile=profile, root=pack_dir, **aux)

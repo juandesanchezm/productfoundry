@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import BaseModel
 
@@ -34,9 +35,9 @@ class ReleaseReport(BaseModel):
 
 class ReleaseStage(Stage):
     stage_name = "release"
-    inputs = ["concept", "assets", "packages", "listings", "review", "printcheck"]
-    outputs = ["release"]
-    input_models = {
+    inputs: ClassVar = ["concept", "assets", "packages", "listings", "review", "printcheck"]
+    outputs: ClassVar = ["release"]
+    input_models: ClassVar = {
         "concept": ProductPlan,
         "assets": AssetPlan,
         "packages": PackagePlan,

@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import BaseModel
 
 from productfoundry.domain.listing import Listing, ListingSet
-from productfoundry.domain.pack import PackProfile
 from productfoundry.domain.packaging import PackagePlan
 from productfoundry.domain.product import ProductPlan
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.stages.helpers import estimate_cost, retry_parse
+from productfoundry.stages.story_helpers import localized_series_name, localized_story_subtitle
 
-PROMPT_VERSION = "listing-v2"
+PROMPT_VERSION = "listing-v3"
 _SYSTEM = "Eres un experto en SEO para marketplaces digitales. Genera SOLO JSON."
 
 
@@ -44,49 +45,37 @@ def normalize_listing(data: dict) -> Listing:
     )
 
 
-def _story_volume(pack, story_id: str) -> int:
-    """1-based index of the story within the pack's story list (its volume number)."""
-    stories = (getattr(pack, "stories", None) or {})
-    if not isinstance(stories, dict):
-        return 0
-    all_stories = stories.get("stories", [])
-    if not isinstance(all_stories, list):
-        return 0
-    for i, s in enumerate(all_stories, start=1):
-        if isinstance(s, dict) and s.get("id") == story_id:
-            return i
-    return 0
-
-
 def _build_prompt(
-    pack: PackProfile,
+    pack,
     plan: ProductPlan,
     languages: list[str],
     formats: list[str],
     story_id: str = "",
 ) -> str:
-    series = pack.series_name or ""
-    volume = _story_volume(pack, story_id)
+    profile = getattr(pack, "profile", pack)
     series_line = ""
-    if series:
-        series_line = f"Serie: {series}"
-        if volume:
-            series_line += f" (este es el volumen {volume} de la serie)"
+    subtitle_lines = ""
+    for lang in languages:
+        series = localized_series_name(pack, lang)
+        if series:
+            series_line += f"\nSerie ({lang}): {series}"
+        subtitle = localized_story_subtitle(pack, story_id, lang, plan.subtitle)
+        if subtitle:
+            subtitle_lines += f"\nSubtítulo ({lang}): {subtitle}"
     return f"""Genera listings SEO para este producto.
 
-Pack: {pack.id} ({pack.pack_type})
+Pack: {profile.id} ({profile.pack_type})
 Tema: {plan.theme}
 Páginas: {len(plan.pages)}
 Idiomas: {", ".join(languages)}
 Formatos: {", ".join(formats)}
 Título (en): {plan.titles.get("en", "")}
-Título (es): {plan.titles.get("es", "")}
-Subtítulo: {plan.subtitle}
-Pista: {plan.description_hint}
-{series_line}
+Título (es): {plan.titles.get("es", "")}{subtitle_lines}
+Pista: {plan.description_hint}{series_line}
 
     Genera un listing por cada combinación de formato, marketplace e idioma.
     Crea entradas distintas para digital y print cuando aplique.
+    No menciones números de volumen ni numeración en los títulos.
 
 Devuelve SOLO JSON:
 {{
@@ -109,9 +98,9 @@ Devuelve SOLO JSON:
 
 class ListingStage(Stage):
     stage_name = "listing"
-    inputs = ["concept", "packages"]
-    outputs = ["listings"]
-    input_models = {"concept": ProductPlan, "packages": PackagePlan}
+    inputs: ClassVar = ["concept", "packages"]
+    outputs: ClassVar = ["listings"]
+    input_models: ClassVar = {"concept": ProductPlan, "packages": PackagePlan}
     prompt_version = PROMPT_VERSION
 
     def output_files(self, ctx: StageContext) -> list[Path]:
@@ -119,7 +108,7 @@ class ListingStage(Stage):
 
     def run(self, ctx: StageContext, concept: ProductPlan, packages: PackagePlan) -> ListingSet:
         prompt = _build_prompt(
-            ctx.pack.profile,
+            ctx.pack,
             concept,
             ctx.request.languages,
             ctx.request.formats,

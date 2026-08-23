@@ -1,10 +1,12 @@
 """LLM provider — Ollama-compatible chat completion with JSON parsing."""
 from __future__ import annotations
+
 import json
 import re
 from typing import Any
+
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from productfoundry.providers import LLMResponse
 
@@ -53,10 +55,16 @@ def ollama_chat(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
+    for attempt in range(2):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                resp = client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+            break
+        except httpx.TimeoutException:
+            if attempt == 1:
+                raise
 
     message = data.get("message", {})
     content = message.get("content", "")

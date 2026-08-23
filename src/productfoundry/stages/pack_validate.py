@@ -6,6 +6,8 @@ before spending a single dollar on images.
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import BaseModel, Field
 
 from productfoundry.domain.bible import (
@@ -15,7 +17,9 @@ from productfoundry.domain.bible import (
     validate_story_characters,
 )
 from productfoundry.domain.product import ProductPlan
+from productfoundry.engine.hashing import sha256_json
 from productfoundry.engine.pipeline import Stage, StageContext
+from productfoundry.series import validate_series_contract
 
 
 class PackValidationReport(BaseModel):
@@ -25,17 +29,54 @@ class PackValidationReport(BaseModel):
     main_character: str = ""
 
 
+def validate_forbidden_marketing_values(pack) -> list[str]:
+    """Fail closed when the pack still carries a legacy marketing value that
+    must never reach customers (old character names, old author, old series).
+
+    The forbidden values are declared by the pack itself
+    (`compliance.forbidden_marketing_values`), keeping the engine
+    niche-agnostic: it only enforces whatever strings the pack lists.
+    """
+    compliance = (getattr(pack, "compliance", None) or {}).get("compliance", {}) or {}
+    markers = compliance.get("forbidden_marketing_values", []) or []
+    if not markers:
+        return []
+    errors: list[str] = []
+    haystack: list[str] = [str(getattr(pack.profile, "author", "")), str(getattr(pack.profile, "series_name", ""))]
+    stories = getattr(pack, "stories", None) or {}
+    if isinstance(stories, dict):
+        roster = stories.get("characters", [])
+        for character in roster if isinstance(roster, list) else []:
+            if isinstance(character, dict):
+                haystack.append(" ".join(str(character.get(k, "")) for k in ("name_en", "name_es")))
+        story_list = stories.get("stories", [])
+        for story in story_list if isinstance(story_list, list) else []:
+            if isinstance(story, dict):
+                for key in ("title_en", "title_es", "subtitle_en", "subtitle_es"):
+                    haystack.append(str(story.get(key, "")))
+    for marker in markers:
+        for text in haystack:
+            if str(marker).casefold() in text.casefold():
+                errors.append(f"forbidden marketing value {marker!r} found in pack metadata")
+    return errors
+
+
 class PackValidationStage(Stage):
     stage_name = "pack_validate"
-    inputs = ["concept"]
-    outputs = ["pack_validate"]
-    input_models = {"concept": ProductPlan}
-    prompt_version = "pack-validate-v1"
+    inputs: ClassVar = ["concept"]
+    outputs: ClassVar = ["pack_validate"]
+    input_models: ClassVar = {"concept": ProductPlan}
+    prompt_version = "pack-validate-v2"
     gate_verdict = "pass"
+
+    def extra_hash_inputs(self, ctx: StageContext) -> list[str]:
+        return [sha256_json(ctx.pack.series)] if ctx.pack.series else []
 
     def run(self, ctx: StageContext, concept: ProductPlan) -> PackValidationReport:
         bible = build_character_bible(ctx.pack)
         errors: list[str] = []
+        errors.extend(validate_series_contract(ctx.pack))
+        errors.extend(validate_forbidden_marketing_values(ctx.pack))
         allowed_ids: set[str] | None = None
         # Only enforce character-bible rules when the pack declares a roster.
         # Roster-less packs (e.g. the generic example pack) use freeform/theme

@@ -1,0 +1,12 @@
+series:
+  id: cocholate-adventures
+  version: 1
+  name:
+    en: "Cocholate's Adventures"
+    es: "Las Aventuras de Cocholate"
+  franchise: cocholate
+  characters:
+    - cocholate
+    - pip
+    - pebble
+    - clover

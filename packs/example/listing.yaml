@@ -1,9 +1,0 @@
-listing:
-  tone: friendly
-  max_title_chars: 140
-  max_description_words: 400
-  min_tags: 8
-  default_prices:
-    etsy_digital: 4.99
-    gumroad_digital: 5.00
-    kdp_print: 8.99

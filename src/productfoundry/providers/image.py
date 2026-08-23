@@ -1,5 +1,6 @@
 """Image generation provider — OpenAI gpt-image-2."""
 from __future__ import annotations
+
 import base64
 import io
 import re
@@ -82,7 +83,7 @@ class PlaceholderImageProvider(ImageProvider):
             cx, cy = w // 2 - tw // 2, h // 2 - th // 2
             draw.rectangle([cx - 20, cy - 10, cx + tw + 20, cy + th + 10], fill=255)
             draw.text((cx, cy), label, fill=0, font=fnt)
-        except Exception:
+        except (OSError, ValueError):
             pass
         buf = io.BytesIO()
         im.save(buf, format="PNG")
@@ -134,4 +135,9 @@ class OpenAIImageProvider(ImageProvider):
         if not b64:
             raise RuntimeError("provider returned empty b64_json")
         raw = base64.b64decode(b64)
-        return _validate_image_bytes(raw)
+        data = _validate_image_bytes(raw)
+        # GPT Image models bill by token usage (image input + text + image
+        # output). Surface the usage so the engine can track real cost instead
+        # of a static price table approximation.
+        request.usage = (resp.usage or {}).model_dump() if hasattr(resp.usage, "model_dump") else (resp.usage or {})
+        return data

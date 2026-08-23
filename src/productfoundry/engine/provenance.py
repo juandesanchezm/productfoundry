@@ -1,5 +1,6 @@
 """Provenance envelope for artifact traceability."""
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 

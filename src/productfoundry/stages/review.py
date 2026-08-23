@@ -1,8 +1,8 @@
 """review stage — deterministic quality gate."""
 from __future__ import annotations
-from pathlib import Path
 
-from pydantic import BaseModel
+from pathlib import Path
+from typing import ClassVar
 
 from productfoundry.domain.assets import AssetPlan
 from productfoundry.domain.listing import ListingSet
@@ -10,7 +10,6 @@ from productfoundry.domain.packaging import PackagePlan
 from productfoundry.domain.product import ProductPlan
 from productfoundry.domain.review import ReviewIssue, ReviewReport
 from productfoundry.engine.pipeline import Stage, StageContext
-
 
 PROMPT_VERSION = "review-v1"
 
@@ -81,9 +80,9 @@ def _check_listings(listings: ListingSet) -> list[ReviewIssue]:
 
 class ReviewStage(Stage):
     stage_name = "review"
-    inputs = ["concept", "assets", "packages", "listings"]
-    outputs = ["review"]
-    input_models = {
+    inputs: ClassVar = ["concept", "assets", "packages", "listings"]
+    outputs: ClassVar = ["review"]
+    input_models: ClassVar = {
         "concept": ProductPlan,
         "assets": AssetPlan,
         "packages": PackagePlan,

@@ -1,0 +1,40 @@
+id: forest-explorer
+title_en: "Cocholate Explores the Forest"
+title_es: "Cocholate Explora el Bosque"
+subtitle_en: "A Coloring Adventure"
+subtitle_es: "Una aventura para colorear"
+description_blurb_en: >
+  Cocholate the baby dragon sets out to explore the world. From the dragon
+  castle to the treasure cave, from the moonlit lake to the cloud kingdom.
+  24 adorable pages of kawaii coloring adventure.
+description_blurb_es: >
+  Cocholate el bebé dragón parte a explorar el mundo. Del castillo del
+  dragón a la cueva del tesoro, del lago bajo la luna al reino de las
+  nubes. 24 páginas adorables de aventura kawaii para colorear.
+characters_present: [cocholate, pip, pebble, clover]
+pages: 24
+arc:
+  - "leaving the cozy nest at dawn, the enchanted forest in the background, tiny backpack ready"
+  - "walking through the morning mist along a winding forest path"
+  - "finding a giant mushroom with steps carved in it, climbing up to look around"
+  - "crossing a wooden bridge over a stream, fish jumping in the water below"
+  - "meeting Pip on a branch, Pip joining the adventure"
+  - "discovering a hollow tree full of glowing fireflies at noon"
+  - "meeting Pebble at the castle gate, Pebble giving a tour, smiling"
+  - "arriving at the dragon castle, tiny castle with round towers, waving at the gate"
+  - "exploring the castle courtyard, flags and round windows"
+  - "finding a secret door behind a tapestry, pushing it open"
+  - "exploring a treasure cave, surrounded by piles of glittering gems, eyes wide"
+  - "sitting on a throne made of pebbles in the cave, wearing a crown of leaves"
+  - "riding a leaf boat through the moonlit lake, fireflies dancing above"
+  - "fishing with a stick and a berry hook, a tiny fish jumping"
+  - "wading through a field of giant dandelions, blowing seeds into the air"
+  - "climbing a fluffy cloud, soft pillows of clouds, smiling at a tiny bird"
+  - "reaching the top of the cloud castle, waving at the stars, super happy"
+  - "riding a gentle cloud slide down from the sky"
+  - "watching the sunrise from the top, golden light over the world"
+  - "finding a rainbow bridge over the valley, walking across it"
+  - "resting in a field of giant flowers, Pip napping on his head"
+  - "following a trail of pebbles that leads back toward the forest"
+  - "running back home through the forest, the nest visible in the distance, humming"
+  - "arriving home at dusk, the nest glowing with fireflies, waving at the moon"

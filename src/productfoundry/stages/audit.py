@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from typing import ClassVar
 
 from productfoundry.domain.assets import AssetPlan
 from productfoundry.domain.audit import (
@@ -26,8 +27,8 @@ from productfoundry.domain.audit import (
 )
 from productfoundry.domain.product import ProductPlan
 from productfoundry.engine.pipeline import Stage, StageContext
-from productfoundry.stages.helpers import estimate_cost
 from productfoundry.providers.llm import _strip_json_fence
+from productfoundry.stages.helpers import estimate_cost
 
 PROMPT_VERSION = "audit-v2"
 JUDGE_MODEL = "minimax-m3"  # vision-capable, available on Ollama Cloud
@@ -152,10 +153,35 @@ Return JSON only:
 {{"status": "ok|warn|fail", "notes": "one short sentence", "rewrite_suggestion": "single-sentence fix if not ok, else empty"}}
 """
 
+BACK_USER_TEMPLATE = """Audit this BACK COVER background illustration for a children's book.
+
+This is a FULL-COLOR illustration (NOT line art). It will receive four
+interior-page thumbnails in the upper area and KDP's ISBN barcode in the
+lower area — so it must leave room for them.
+
+Audience/niche: {audience}. Reject (fail) any image that is not appropriate
+for this audience (scary, violent, inappropriate themes).
+
+Check:
+- The scene is a soft, dreamy background (forest, meadow, sky)
+- NO characters, NO animals, NO figures of any kind: pure scenery only
+- The upper area is calm and clean (thumbnail zone), the lower area is quiet
+  and mostly empty (barcode zone)
+- NO text, NO letters, NO words, NO sign, NO banner, NO watermark, NO signature anywhere
+- No anatomy artifacts, no multiple large figures
+- The image is vibrant but gentle, not busy, not cluttered
+
+Reject (fail) when: any character or animal appears, any text appears, the
+center is cluttered, the bottom is busy, or the image is dark/scary.
+
+Return JSON only:
+{{"status": "ok|warn|fail", "notes": "one short sentence", "rewrite_suggestion": "single-sentence fix if not ok, else empty"}}
+"""
+
 HERO_USER_TEMPLATE = """Audit this cover illustration for a children's book.
 
 This is a FULL-COLOR cover illustration (NOT line art). Evaluate color, composition,
-character identity, and text artifacts.
+character identity, and text.
 
 Main character characterization (the character in the image MUST match this shape):
 {characterization}
@@ -163,13 +189,30 @@ Main character characterization (the character in the image MUST match this shap
 Audience/niche: {audience}. Reject (fail) any image that is not appropriate
 for this audience (scary, violent, adult themes).
 
+The cover REQUIRES the exact title text embedded by the artist in a clearly
+separated text zone (a sign, banner, cloud, arch or frame). The expected copy
+is given below; verify it letter by letter, including accents and punctuation.
+
+Expected title: {expected_title}
+Expected subtitle: {expected_subtitle}
+Expected age badge: {expected_age_badge}
+Expected author name: {expected_author}
+
 Check:
 - The protagonist is centered and clearly the hero of the cover
-- The protagonist matches its characterization (correct species, key traits, proportions)
-- The composition has breathing room for a title overlay (top/bottom)
-- No text, no letters, no watermark, no signature in the image
+- The protagonist matches its characterization (correct species, key traits,
+  proportions, and official colors when specified)
+- The composition has a clearly separated text zone (sign, banner, cloud, arch or frame)
+- The text inside that zone is a single language, fully readable, WITHOUT spelling
+  errors, and matches the expected copy EXACTLY (title, subtitle, age badge, author)
+- NO extra words, letters, watermark, or signature anywhere else in the image
 - The image is vibrant and appealing (not dull, dark, or scary)
 - No anatomical artifacts (extra limbs, distorted features)
+
+Reject (fail) when: any text is misspelled or missing, accents are wrong or missing,
+the text is a different language than expected, the text zone is missing, or any
+unexpected text appears anywhere in the image. The copy is the product contract:
+it must be exactly as provided.
 
 Return JSON only:
 {{"status": "ok|warn|fail", "notes": "one short sentence", "rewrite_suggestion": "single-sentence fix if not ok, else empty"}}
@@ -238,7 +281,7 @@ def _complete_with_image_json(
         try:
             data = _parse_judge_json(response.content)
             if not isinstance(data, dict):
-                raise ValueError("judge response must be a JSON object")
+                raise TypeError("judge response must be a JSON object")
             return data
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
@@ -288,7 +331,7 @@ def _audit_prompts(ctx: StageContext, plan: ProductPlan) -> PromptAuditReport:
             )
             for v in data.get("verdicts", [])
         ]
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError, KeyError):
         # Parse failure → fail-closed: a judge that cannot answer must not
         # approve anything.
         verdicts = [AuditVerdict(status="fail", notes="judge parse failure") for _ in plan.pages]
@@ -312,14 +355,14 @@ def _audit_prompts(ctx: StageContext, plan: ProductPlan) -> PromptAuditReport:
         for i, rw in enumerate(rewrites):
             if i < len(plan.pages) and rw:
                 plan.pages[i].prompt = f"{plan.pages[i].prompt}. Correction: {rw}"
-    except Exception:
+    except (TypeError, AttributeError, KeyError, ValueError):
         pass
 
     return PromptAuditReport(verdicts=verdicts, vision_model=_judge_model(ctx.pack))
 
 
 def _audit_single_image(
-    ctx: StageContext, asset, path: Path, hero_mode: bool = False, page=None
+    ctx: StageContext, asset, path: Path, hero_mode: bool = False, page=None, back_mode: bool = False
 ) -> AuditVerdict:
     """Judge a single generated image against the main character's
     characterization and the audience. Fail-closed: parse errors and unknown
@@ -336,10 +379,19 @@ def _audit_single_image(
         return AuditVerdict(status="fail", notes="asset file missing")
     img_bytes = path.read_bytes()
     img_b64 = base64.b64encode(img_bytes).decode("ascii")
-    template = HERO_USER_TEMPLATE if hero_mode else IMAGE_USER_TEMPLATE
-    if hero_mode:
-        user = template.format(characterization=characterization, audience=audience)
+    if back_mode:
+        user = BACK_USER_TEMPLATE.format(audience=audience)
+    elif hero_mode:
+        user = HERO_USER_TEMPLATE.format(
+            characterization=characterization,
+            audience=audience,
+            expected_title=getattr(asset, "expected_title", "") or "",
+            expected_subtitle=getattr(asset, "expected_subtitle", "") or "",
+            expected_age_badge=getattr(asset, "expected_age_badge", "") or "",
+            expected_author=getattr(asset, "expected_author", "") or "",
+        )
     else:
+        template = IMAGE_USER_TEMPLATE
         user = template.format(
             index=1,
             characterization=characterization,
@@ -451,20 +503,27 @@ def _main_character(pack) -> dict | None:
 
 
 def _audit_character_sheet(ctx: StageContext, character: dict | None = None) -> AuditVerdict:
-    """Audit the character sheet against its official characterization.
+    """Audit the canonical character reference against its official characterization.
 
     The sheet is the canonical reference for the whole book (and series), so
     the judge must confirm it matches the characterization before any page is
-    generated from it. Returns a verdict; the pipeline decides whether to
-    regenerate.
+    generated from it. Franchise catalogs audit the catalog PNG directly; a
+    failure is fail-closed (never auto-regenerated from a canonical source).
+    Returns a verdict; the pipeline decides whether to regenerate.
     """
     character = character or _main_character(ctx.pack)
     if character is None:
         return AuditVerdict(status="ok", notes="no roster in pack; sheet not audited")
 
-    from productfoundry.stages.character_sheet import _sheet_path
+    from productfoundry.series import canonical_character_reference
 
-    sheet_path = _sheet_path(ctx.assets_dir, character.get("id", ""))
+    char_id = character.get("id", "")
+    try:
+        sheet_path = canonical_character_reference(ctx.pack, char_id)
+    except ValueError:
+        from productfoundry.stages.character_sheet import _sheet_path
+
+        sheet_path = _sheet_path(ctx.assets_dir, char_id)
     if not sheet_path.exists():
         return AuditVerdict(status="fail", notes="character sheet missing")
 
@@ -473,6 +532,9 @@ def _audit_character_sheet(ctx: StageContext, character: dict | None = None) -> 
         or character.get("archetype_en")
         or character.get("name_en", "the main character")
     )
+    palette = character.get("palette_en", "") or ""
+    if palette:
+        characterization = f"{characterization} Official colors: {palette}."
     user = SHEET_USER_TEMPLATE.format(characterization=characterization)
     img_b64 = base64.b64encode(sheet_path.read_bytes()).decode("ascii")
     data = _complete_with_image_json(ctx, PROMPT_SYSTEM, user, img_b64, _judge_model(ctx.pack))
@@ -495,9 +557,9 @@ def _audit_character_sheet(ctx: StageContext, character: dict | None = None) -> 
 
 class CharacterSheetAuditStage(Stage):
     stage_name = "audit_character_sheet"
-    inputs = ["character_sheet"]
-    outputs = ["audit_character_sheet"]
-    input_models = {"character_sheet": AssetPlan}
+    inputs: ClassVar = ["character_sheet"]
+    outputs: ClassVar = ["audit_character_sheet"]
+    input_models: ClassVar = {"character_sheet": AssetPlan}
     prompt_version = f"{PROMPT_VERSION}-sheet"
     max_regenerations = 2
     gate_verdict = "pass"
@@ -521,18 +583,30 @@ class CharacterSheetAuditStage(Stage):
         verdicts: list[AuditVerdict] = []
         for character in _roster(ctx.pack):
             verdict = _audit_character_sheet(ctx, character)
-            # Regenerate only the failing sheet, up to max_regenerations attempts.
+            # Regenerate only a generated (non-canonical) failing sheet, up to
+            # max_regenerations attempts. Canonical catalog references are
+            # fail-closed: never overwrite the franchise's source of truth.
             for _ in range(self.max_regenerations):
                 if verdict.status != "fail":
                     break
-                sheet_path = _sheet_path(ctx.assets_dir, character.get("id", ""))
+                from productfoundry.series import canonical_character_reference
+
+                char_id = character.get("id", "")
+                try:
+                    canonical_character_reference(ctx.pack, char_id)
+                    is_canonical = True
+                except ValueError:
+                    is_canonical = False
+                if is_canonical:
+                    break
+                sheet_path = _sheet_path(ctx.assets_dir, char_id)
                 if sheet_path.exists():
                     sheet_path.unlink()
                 if character.get("role") == "main" and _main_sheet_path(ctx.assets_dir).exists():
                     _main_sheet_path(ctx.assets_dir).unlink()
                 try:
                     CharacterSheetStage().run(ctx)
-                except Exception as e:
+                except (OSError, RuntimeError) as e:
                     verdict = AuditVerdict(
                         status="fail",
                         notes=f"sheet regeneration rejected by provider: {e}",
@@ -549,9 +623,9 @@ class CharacterSheetAuditStage(Stage):
 
 class PromptAuditStage(Stage):
     stage_name = "audit_prompt"
-    inputs = ["concept"]
-    outputs = ["audit_prompt"]
-    input_models = {"concept": ProductPlan}
+    inputs: ClassVar = ["concept"]
+    outputs: ClassVar = ["audit_prompt"]
+    input_models: ClassVar = {"concept": ProductPlan}
     prompt_version = f"{PROMPT_VERSION}-prompt"
     gate_verdict = "pass"
     max_rewrites = 2
@@ -585,9 +659,9 @@ class PromptAuditStage(Stage):
 
 class AssetAuditStage(Stage):
     stage_name = "audit_assets"
-    inputs = ["assets"]
-    outputs = ["audit_assets"]
-    input_models = {"assets": AssetPlan}
+    inputs: ClassVar = ["assets"]
+    outputs: ClassVar = ["audit_assets"]
+    input_models: ClassVar = {"assets": AssetPlan}
     prompt_version = f"{PROMPT_VERSION}-image"
     gate_verdict = "pass"
 

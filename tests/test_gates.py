@@ -2,6 +2,8 @@
 cache invalidation and release manifest."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 from PIL import Image
@@ -17,10 +19,21 @@ from productfoundry.domain.bible import (
 from productfoundry.domain.manifest import PublicationManifest
 from productfoundry.domain.product import Character, PageSpec, ProductPlan
 from productfoundry.engine.hashing import sha256_text
-from productfoundry.pack_loader import load_pack
 from productfoundry.stages.lineart_check import _check_image
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _catalog_pack():
+    """Load the synthesized Pack for cocholate/magical-day/coloring-fantasy."""
+    from productfoundry.catalog import resolve_book
+
+    return resolve_book(
+        ROOT / "projects" / "cocholate",
+        "cocholate-adventures",
+        "magical-day",
+        "coloring-fantasy",
+    ).pack
 
 
 # ---------------------------------------------------------------- audit gates
@@ -40,7 +53,7 @@ def test_character_sheet_audit_covers_every_roster_sheet(tmp_path):
     from productfoundry.domain.assets import AssetPlan, AssetSpec
     from productfoundry.stages.audit import CharacterSheetAuditStage
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     roster = pack.stories["characters"]
     assets = AssetPlan(
         assets=[
@@ -107,19 +120,19 @@ def test_bible_rejects_duplicate_ids():
 
 
 def test_story_characters_must_be_in_roster():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     bible = build_character_bible(pack)
     assert validate_story_characters(pack, bible) == []
 
 
 def test_page_plan_requires_main_in_every_page():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     bible = build_character_bible(pack)
     plan = ProductPlan(
         pack_id="x",
         pack_version=1,
         theme="t",
-        pages=[PageSpec(id="p1", index=1, prompt="x", characters=["blaze"])],
+        pages=[PageSpec(id="p1", index=1, prompt="x", characters=["cocholate"])],
     )
     assert validate_page_plan(plan, bible) == []
     plan.pages[0].characters = ["ghost"]
@@ -129,26 +142,26 @@ def test_page_plan_requires_main_in_every_page():
 
 
 def test_character_names_from_llm_normalize_to_roster_ids():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
-    assert normalize_character_ids(pack, ["Blaze", "Pip"]) == ["blaze", "pip"]
+    pack = _catalog_pack()
+    assert normalize_character_ids(pack, ["Cocholate", "Pip"]) == ["cocholate", "pip"]
 
 
 def test_page_plan_rejects_secondary_outside_story_cast():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     bible = build_character_bible(pack)
     plan = ProductPlan(
         pack_id="x",
         pack_version=1,
         theme="t",
-        pages=[PageSpec(id="p1", index=1, prompt="x", characters=["blaze", "clover"])],
+        pages=[PageSpec(id="p1", index=1, prompt="x", characters=["cocholate", "clover"])],
     )
-    errors = validate_page_plan(plan, bible, allowed_ids={"blaze", "pip", "pebble"})
+    errors = validate_page_plan(plan, bible, allowed_ids={"cocholate", "pip", "pebble"})
     assert any("not allowed in this story" in e for e in errors)
 
 
 def test_first_day_bedtime_pages_have_distinct_scenes():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
-    story = next(story for story in pack.stories["stories"] if story["id"] == "baby-dragon-first-day")
+    pack = _catalog_pack()
+    story = next(story for story in pack.stories["stories"] if story["id"] == "magical-day")
     goodnight_page, final_page = story["arc"][20], story["arc"][-1]
 
     assert story["pages"] == 24
@@ -159,7 +172,7 @@ def test_first_day_bedtime_pages_have_distinct_scenes():
 
 
 def test_pack_declares_clover_hopping_traits():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     clover = next(character for character in pack.stories["characters"] if character["id"] == "clover")
     description = clover["description_en"].lower()
 
@@ -169,16 +182,16 @@ def test_pack_declares_clover_hopping_traits():
 
 
 def test_coloring_pack_defaults_are_kdp_ready_and_use_real_author():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
 
     assert pack.profile.page_count == 24
-    assert pack.profile.author == "Juande Sánchez"
+    assert pack.profile.author == "Noa Bloom"
     assert pack.profile.languages == ["en", "es"]
     assert set(pack.profile.formats.model_dump()) == {"digital", "print"}
 
 
 def test_coloring_style_does_not_request_excessive_blank_padding():
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     positive = pack.style["style"]["positive_prompt_suffix"]
 
     assert "15 percent blank space" not in positive
@@ -188,21 +201,21 @@ def test_coloring_style_does_not_request_excessive_blank_padding():
 def test_pack_validation_rejects_short_print_requests_before_generation():
     from productfoundry.stages.pack_validate import PackValidationStage
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     concept = ProductPlan(
         pack_id="coloring-fantasy",
         pack_version=2,
         theme="moonlit-discovery",
         pages=[
-            PageSpec(id=f"page_{index:03d}", index=index, prompt="scene", characters=["blaze"])
+            PageSpec(id=f"page_{index:03d}", index=index, prompt="scene", characters=["cocholate"])
             for index in range(1, 11)
         ],
     )
 
     class FakeRequest:
         page_count = 10
-        formats = ["print"]
-        story_id = "baby-dragon-first-day"
+        formats: ClassVar = ["print"]
+        story_id = "magical-day"
 
     class FakeContext:
         request = FakeRequest()
@@ -242,11 +255,25 @@ def test_lineart_rejects_wrong_size(tmp_path):
 def test_lineart_passes_clean_binary(tmp_path):
     p = tmp_path / "page_001.png"
     im = Image.new("L", (2550, 3300), 255)
-    for x in range(0, 2550, 4):
-        for y in range(0, 3300, 4):
+    for x in range(128, 2422, 4):
+        for y in range(165, 3135, 4):
             im.putpixel((x, y), 0)
     im.save(p)
     assert _check_image(p, 2550, 3300).status == "pass"
+
+
+def test_lineart_rejects_ink_inside_trim_margin(tmp_path):
+    p = tmp_path / "page_001.png"
+    im = Image.new("L", (2550, 3300), 255)
+    for x in range(0, 2500, 4):
+        for y in range(165, 3135, 4):
+            im.putpixel((x, y), 0)
+    im.save(p)
+
+    result = _check_image(p, 2550, 3300)
+
+    assert result.status == "fail"
+    assert "margin" in result.detail
 
 
 # ---------------------------------------------------------------- cache hash
@@ -264,7 +291,7 @@ def test_config_hash_includes_aux_files():
 def test_design_hash_changes_with_roster():
     from productfoundry.stages.assets import _character_design_hash
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     h1 = _character_design_hash(pack)
     pack.stories = dict(pack.stories)
     pack.stories["characters"] = [{"id": "other", "role": "main", "name_en": "Other"}]
@@ -430,36 +457,39 @@ def test_quality_policies_default():
     assert p.image_policies.cover.attempts == ["high", "high", "high"]
 
 
-def test_hero_prompt_requires_the_exact_localized_title():
+def test_hero_prompt_requires_the_exact_english_title_and_official_colors():
     from productfoundry.stages.hero import _build_hero_prompt
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     plan = ProductPlan(
         pack_id=pack.profile.id,
         pack_version=pack.profile.pack_version,
-        theme="moonlit-discovery",
-        titles={"en": "Blaze's Moonlit Discovery", "es": "El Descubrimiento Lunar de Blaze"},
+        theme="cocoa-magical-day",
+        titles={"en": "Cocholate's Magical Day", "es": "El Día Mágico de Cocholate"},
     )
 
-    prompt = _build_hero_prompt(plan, pack, "es")
+    prompt = _build_hero_prompt(plan, pack, "en", "magical-day")
 
-    assert "El Descubrimiento Lunar de Blaze" in prompt
-    assert "exact title text" in prompt.lower()
+    assert "Cocholate's Magical Day" in prompt
+    assert "A Coloring Adventure" in prompt
+    assert "Noa Bloom" in prompt
+    assert "Ages 3-8" in prompt
+    assert "text zone" in prompt.lower()
+    assert "chocolate brown" in prompt
 
 
-def test_hero_stage_has_one_output_per_requested_language():
+def test_hero_stage_has_one_shared_artwork_for_all_languages():
     from productfoundry.stages.hero import HeroStage
 
     class FakeRequest:
-        languages = ["en", "es"]
+        languages: ClassVar = ["en", "es"]
 
     class FakeContext:
         assets_dir = Path("assets")
         request = FakeRequest()
 
     assert HeroStage().output_files(FakeContext()) == [
-        Path("assets/cover_hero_en.png"),
-        Path("assets/cover_hero_es.png"),
+        Path("assets/cover_hero.png"),
     ]
 
 
@@ -470,18 +500,18 @@ def test_reference_routing_only_includes_page_characters(tmp_path):
     from productfoundry.stages.assets import _load_page_references
 
     # Create fake character sheets
-    (tmp_path / "character_sheet_blaze.png").write_bytes(b"main-sheet")
+    (tmp_path / "character_sheet_cocholate.png").write_bytes(b"main-sheet")
     (tmp_path / "character_sheet_pip.png").write_bytes(b"pip-sheet")
 
     class FakeCtx:
         assets_dir = tmp_path
 
-    page = PageSpec(id="p1", index=1, prompt="x", characters=["blaze"])
+    page = PageSpec(id="p1", index=1, prompt="x", characters=["cocholate"])
     refs = _load_page_references(FakeCtx(), page)
     assert len(refs) == 1
     assert refs[0] == b"main-sheet"
 
-    page = PageSpec(id="p2", index=2, prompt="x", characters=["blaze", "pip"])
+    page = PageSpec(id="p2", index=2, prompt="x", characters=["cocholate", "pip"])
     refs = _load_page_references(FakeCtx(), page)
     assert len(refs) == 2
 
@@ -495,16 +525,16 @@ def test_page_prompt_contains_canonical_characters_and_style():
     from productfoundry.domain.product import PageSpec
     from productfoundry.stages.assets import build_page_prompt
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     page = PageSpec(
         id="page_001",
         index=1,
-        prompt="Blaze wakes up in a cozy nest with Pip nearby.",
+        prompt="Cocholate wakes up in a cozy nest with Pip nearby.",
         beat="waking up in the cozy nest",
-        characters=["blaze", "pip"],
+        characters=["cocholate", "pip"],
     )
     prompt = build_page_prompt(page, pack)
-    assert "Blaze, a cute kawaii baby dragon" in prompt
+    assert "Cocholate, a cute kawaii baby dragon" in prompt
     assert "Pip, a tiny round yellow baby bird" in prompt
     assert "waking up in the cozy nest" in prompt
     assert "kawaii chibi style" in prompt
@@ -515,18 +545,18 @@ def test_story_mode_prompt_keeps_theme_distinct_from_story_id():
     from productfoundry.domain.product import ProductRequest
     from productfoundry.stages.concept import _build_prompt
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     request = ProductRequest(
         pack="coloring-fantasy",
         theme="moonlit discovery",
         page_count=24,
-        story_id="baby-dragon-first-day",
+        story_id="magical-day",
     )
 
     prompt = _build_prompt(pack, request)
 
     assert "moonlit discovery" in prompt
-    assert "baby-dragon-first-day" not in prompt
+    assert "magical-day" not in prompt
 
 
 def test_prompt_audit_requires_story_variety_and_child_engagement():
@@ -563,7 +593,7 @@ def test_image_judge_retries_parse_failure_without_regenerating_image():
     from productfoundry.stages.audit import _complete_with_image_json
 
     class FakeLLM:
-        responses = ["not json", '{"status": "ok"}']
+        responses: ClassVar = ["not json", '{"status": "ok"}']
 
         def complete_with_image(self, system, user, image_b64, model=None):
             content = self.responses.pop(0)
@@ -614,7 +644,7 @@ def test_prompt_audit_retries_after_judge_rewrite():
         pack_id="x",
         pack_version=1,
         theme="t",
-        pages=[PageSpec(id="page_001", index=1, prompt="old", characters=["blaze"])],
+        pages=[PageSpec(id="page_001", index=1, prompt="old", characters=["cocholate"])],
     )
     report = PromptAuditStage().run(FakeContext(), plan)
     assert report.verdict == "pass"
@@ -641,14 +671,14 @@ def test_package_rejects_incomplete_processed_page_set(tmp_path):
     from productfoundry.domain.product import PageSpec, ProductPlan
     from productfoundry.stages.package import build_packages
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     plan = ProductPlan(
         pack_id=pack.profile.id,
         pack_version=pack.profile.pack_version,
         theme="test",
         pages=[
-            PageSpec(id="page_001", index=1, prompt="one", characters=["blaze"]),
-            PageSpec(id="page_002", index=2, prompt="two", characters=["blaze"]),
+            PageSpec(id="page_001", index=1, prompt="one", characters=["cocholate"]),
+            PageSpec(id="page_002", index=2, prompt="two", characters=["cocholate"]),
         ],
     )
     assets = AssetPlan(
@@ -700,13 +730,13 @@ def test_digital_pdf_includes_cover_when_print_bundle_is_requested(tmp_path):
     from productfoundry.domain.assets import AssetPlan, AssetSpec
     from productfoundry.stages.package import build_packages
 
-    pack = load_pack(ROOT / "packs" / "coloring-fantasy")
+    pack = _catalog_pack()
     plan = ProductPlan(
         pack_id=pack.profile.id,
         pack_version=pack.profile.pack_version,
         theme="test",
         pages=[
-            PageSpec(id=f"page_{index:03d}", index=index, prompt="scene", characters=["blaze"])
+            PageSpec(id=f"page_{index:03d}", index=index, prompt="scene", characters=["cocholate"])
             for index in range(1, 25)
         ],
         titles={"en": "Test English", "es": "Prueba Español"},
@@ -746,15 +776,123 @@ def test_digital_pdf_includes_cover_when_print_bundle_is_requested(tmp_path):
     assert len(PdfReader(str(digital_pdf)).pages) == 25
 
 
-def test_wrap_cover_leaves_kdp_barcode_area_blank(tmp_path):
+def test_kdp_upload_kit_contains_interior_and_cover_per_language(tmp_path):
+    from pypdf import PdfReader
+
+    from productfoundry.domain.assets import AssetPlan, AssetSpec
+    from productfoundry.stages.package import build_packages
+
+    pack = _catalog_pack()
+    plan = ProductPlan(
+        pack_id=pack.profile.id,
+        pack_version=pack.profile.pack_version,
+        theme="kit-test",
+        pages=[
+            PageSpec(id=f"page_{index:03d}", index=index, prompt="scene", characters=["cocholate"])
+            for index in range(1, 25)
+        ],
+        titles={"en": "Kit English", "es": "Kit Español"},
+    )
+    assets = AssetPlan(
+        assets=[
+            AssetSpec(
+                id=f"page_{index:03d}", page_id=f"page_{index:03d}", prompt="scene", audit_status="ok"
+            )
+            for index in range(1, 25)
+        ]
+    )
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    for index in range(1, 25):
+        Image.new("RGB", (300, 300), "white").save(processed / f"page_{index:03d}.png")
+
+    build_packages(
+        assets=assets,
+        plan=plan,
+        pack=pack,
+        request_theme="kit-test",
+        request_story_id="",
+        request_page_count=24,
+        processed_dir=processed,
+        packages_dir=tmp_path / "packages",
+        assets_dir=tmp_path / "assets",
+        languages=["en", "es"],
+        formats=["print"],
+    )
+
+    for lang in ("en", "es"):
+        kit = tmp_path / "packages" / "kdp_upload" / lang
+        interior = kit / f"{pack.profile.id}-kit-test-interior.pdf"
+        cover = kit / f"{pack.profile.id}-kit-test-cover.pdf"
+        assert interior.exists(), f"missing interior kit for {lang}"
+        assert cover.exists(), f"missing cover kit for {lang}"
+        assert (kit / "kdp-checklist.md").exists()
+        interior_reader = PdfReader(str(interior))
+        assert len(interior_reader.pages) == 24
+        page = interior_reader.pages[0]
+        assert abs(float(page.mediabox.width) / 72.0 - 8.5) < 0.01
+        assert abs(float(page.mediabox.height) / 72.0 - 11.0) < 0.01
+
+
+def test_print_interior_is_trim_size_without_bleed(tmp_path):
+    from pypdf import PdfReader
+
+    from productfoundry.domain.assets import AssetPlan, AssetSpec
+    from productfoundry.stages.package import build_packages
+
+    pack = _catalog_pack()
+    plan = ProductPlan(
+        pack_id=pack.profile.id,
+        pack_version=pack.profile.pack_version,
+        theme="trim-test",
+        pages=[
+            PageSpec(id=f"page_{index:03d}", index=index, prompt="scene", characters=["cocholate"])
+            for index in range(1, 25)
+        ],
+    )
+    assets = AssetPlan(
+        assets=[
+            AssetSpec(
+                id=f"page_{index:03d}", page_id=f"page_{index:03d}", prompt="scene", audit_status="ok"
+            )
+            for index in range(1, 25)
+        ]
+    )
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    for index in range(1, 25):
+        Image.new("RGB", (300, 300), "white").save(processed / f"page_{index:03d}.png")
+
+    build_packages(
+        assets=assets,
+        plan=plan,
+        pack=pack,
+        request_theme="trim-test",
+        request_story_id="",
+        request_page_count=24,
+        processed_dir=processed,
+        packages_dir=tmp_path / "packages",
+        assets_dir=tmp_path / "assets",
+        languages=["en"],
+        formats=["print"],
+    )
+
+    interior = min((tmp_path / "packages" / "print" / "en").glob("*interior.pdf"))
+    page = PdfReader(str(interior)).pages[0]
+    # No-bleed interior: PDF page equals trim size exactly (8.5x11)
+    assert abs(float(page.mediabox.width) / 72.0 - 8.5) < 0.01
+    assert abs(float(page.mediabox.height) / 72.0 - 11.0) < 0.01
+
+
+def test_wrap_cover_leaves_kdp_barcode_area_as_artwork(tmp_path):
     from productfoundry.packaging import build_wrap_cover
 
     cover = tmp_path / "cover.png"
     build_wrap_cover(
         title="A Title",
         subtitle="",
-        author="Juande Sánchez",
-        back_blurb="A short blurb.",
+        author="Noa Bloom",
+        back_blurb="",
         out_path=cover,
         page_count=24,
         page_size="8.5x11",
@@ -762,8 +900,8 @@ def test_wrap_cover_leaves_kdp_barcode_area_blank(tmp_path):
     )
 
     with Image.open(cover) as image:
-        # The lower back-cover barcode reservation must stay white until KDP
-        # inserts a real ISBN barcode.
+        # No synthetic barcode box is drawn: KDP places the ISBN barcode on
+        # the plain background automatically. Lower back cover stays white.
         _, height = image.size
         back_width = round(8.5 * 300)
         bottom = image.crop((0, height - round(0.9 * 300), back_width, height))
@@ -809,3 +947,84 @@ def test_postprocess_preserves_aspect_ratio(tmp_path):
     with Image.open(dst) as im:
         assert im.width == 2550  # 8.5 * 300
         assert im.height == 3300  # 11 * 300
+
+
+def test_postprocess_normalizes_ink_to_safe_margin(tmp_path):
+    from PIL import Image
+
+    from productfoundry.stages.postprocess import to_grayscale_and_threshold
+
+    src = tmp_path / "raw.png"
+    Image.new("L", (100, 100), 0).save(src)
+    dst = tmp_path / "processed.png"
+
+    to_grayscale_and_threshold(src, dst, target_inches=1.0, target_height_inches=1.0)
+
+    with Image.open(dst) as im:
+        bbox = im.convert("L").point(lambda p: 255 if p == 0 else 0).getbbox()
+        assert bbox is not None
+        assert bbox[0] >= 15
+        assert bbox[1] >= 15
+        assert bbox[2] <= 285
+        assert bbox[3] <= 285
+
+
+def test_postprocess_outputs_binary_pixels_after_fitting(tmp_path):
+    from PIL import Image, ImageDraw
+
+    from productfoundry.stages.postprocess import to_grayscale_and_threshold
+
+    src = tmp_path / "raw.png"
+    image = Image.new("L", (100, 100), 255)
+    ImageDraw.Draw(image).ellipse((10, 10, 90, 90), fill=0)
+    image.save(src)
+    dst = tmp_path / "processed.png"
+
+    to_grayscale_and_threshold(src, dst, target_inches=1.0, target_height_inches=1.0)
+
+    with Image.open(dst) as im:
+        histogram = im.convert("L").histogram()
+        assert sum(histogram[1:255]) == 0
+
+
+def test_pack_validate_rejects_forbidden_legacy_marketing_values():
+    from productfoundry.stages.pack_validate import validate_forbidden_marketing_values
+
+    pack = _catalog_pack()
+    assert validate_forbidden_marketing_values(pack) == []
+
+    bad = SimpleNamespace(
+        profile=SimpleNamespace(author="Juande Sánchez", series_name="Blaze & Friends"),
+        stories={
+            "characters": [{"id": "blaze", "name_en": "Blaze", "name_es": "Blaze"}],
+            "stories": [{"id": "s", "title_en": "Blaze's Day", "title_es": "El Día de Blaze"}],
+        },
+        compliance={"compliance": {"forbidden_marketing_values": ["Blaze", "Juande Sánchez"]}},
+    )
+    errors = validate_forbidden_marketing_values(bad)
+    assert errors
+
+
+def test_listing_prompt_uses_localized_series_without_volume():
+    from productfoundry.domain.product import ProductPlan
+    from productfoundry.stages.listing import _build_prompt
+
+    pack = _catalog_pack()
+    plan = ProductPlan(
+        pack_id=pack.profile.id,
+        pack_version=pack.profile.pack_version,
+        theme="cocoa-magical-day",
+        titles={"en": "Cocholate's Magical Day", "es": "El Día Mágico de Cocholate"},
+        subtitle="Una aventura para colorear",
+        pages=[],
+    )
+
+    prompt = _build_prompt(pack, plan, ["en", "es"], ["digital"], "magical-day")
+
+    assert "Cocholate's Adventures" in prompt
+    assert "Las Aventuras de Cocholate" in prompt
+    assert "volumen 1" not in prompt
+    assert "este es el volumen" not in prompt
+    assert "Una aventura para colorear" in prompt
+    assert "A Coloring Adventure" in prompt
+    assert "Blaze" not in prompt

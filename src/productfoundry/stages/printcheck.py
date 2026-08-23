@@ -14,12 +14,12 @@ Checks:
 - sRGB color space, no alpha channel on interior pages and cover
 - Zero alpha-zero pages (no blank pages slipped in)
 
-Output: projects/<id>/artifacts/printcheck.json with per-criterion PASS/FAIL.
+Output: <edition>/artifacts/printcheck.json with per-criterion PASS/FAIL.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -76,7 +76,7 @@ def _check_interior_dimensions(
         )
     try:
         result = _check_interior_dimensions_pypdf(interior_pdf)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         return (
             PrintCheckResult(criterion="interior_dimensions", status="FAIL", detail=f"pypdf error: {e}"),
             0.0,
@@ -142,7 +142,7 @@ def _check_interior_dpi_from_pdf(
         )
     try:
         reader = PdfReader(str(interior_pdf))
-    except Exception as e:
+    except (OSError, ValueError) as e:
         return (
             PrintCheckResult(criterion="interior_dpi", status="FAIL", detail=f"pypdf error: {e}"),
             0.0,
@@ -162,6 +162,7 @@ def _check_interior_dpi_from_pdf(
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         if result.returncode == 0:
             line_count = 0
@@ -235,15 +236,14 @@ def _check_interior_dpi_from_pdf(
 
 
 def _check_ink_safe_margin(
-    interior_pdf: Path, trim_w_in: float, trim_h_in: float, safe_in: float = 0.25
+    interior_pdf: Path, trim_w_in: float, trim_h_in: float, safe_in: float = 0.375
 ) -> tuple[PrintCheckResult, float]:
     """Detect any non-white pixel within `safe_in` of the trim edge.
 
-    Reads the PDF rendered pages (or extracts image pixels) and looks for
-    dark pixels in the trim border. The package stage now pads the source
-    image with bleed so the source 1024x1024 PNG will have ink as close as
-    the edge; the check instead reads the actual PDF page to verify the
-    printer's safe margin is clean.
+    The interior PDF is built at trim size with no bleed (line-art pages),
+    pages), so the page edge equals the trim edge and the danger band is the
+    KDP ink-safe margin (0.375in for books of 24-150 pages) measured from the
+    page edge.
     """
     if not interior_pdf.exists():
         return (
@@ -251,7 +251,7 @@ def _check_ink_safe_margin(
             0.0,
         )
 
-    bleed_in = 0.125
+    bleed_in = 0.0
 
     # Use pdfimages to list images per page; check those for ink near the
     # trim edge of the PDF page.
@@ -264,6 +264,7 @@ def _check_ink_safe_margin(
                 ["pdfimages", "-png", "-p", str(interior_pdf), os.path.join(tmpdir, "img")],
                 capture_output=True,
                 timeout=120,
+                check=False,
             )
             image_paths = sorted(Path(tmpdir).glob("img-*.png"))
             if not image_paths:
@@ -275,7 +276,7 @@ def _check_ink_safe_margin(
                     safe_in,
                 )
             PX_PER_IN = 300
-            danger_px = int(round((bleed_in + safe_in) * PX_PER_IN))
+            danger_px = round((bleed_in + safe_in) * PX_PER_IN)
             violations = 0
             for img_path in image_paths:
                 try:
@@ -291,7 +292,7 @@ def _check_ink_safe_margin(
                             if dark > 0:
                                 violations += 1
                                 break
-                except Exception:
+                except OSError:
                     continue
             if violations == 0:
                 return (
@@ -322,7 +323,7 @@ def _check_ink_safe_margin(
 
         reader = PdfReader(str(interior_pdf))
         PX_PER_IN = 300
-        danger_px = int(round((bleed_in + safe_in) * PX_PER_IN))
+        danger_px = round((bleed_in + safe_in) * PX_PER_IN)
         violations = 0
         for page in reader.pages:
             for img in page.images:
@@ -339,7 +340,7 @@ def _check_ink_safe_margin(
                             if dark > 0:
                                 violations += 1
                                 break
-                except Exception:
+                except (OSError, ValueError):
                     continue
         if violations == 0:
             return (
@@ -356,7 +357,7 @@ def _check_ink_safe_margin(
             ),
             safe_in,
         )
-    except Exception:
+    except (OSError, ValueError):
         pass
 
     return (
@@ -378,7 +379,7 @@ def _check_page_count(interior_pdf: Path, expected: int) -> PrintCheckResult:
         actual = len(reader.pages)
     except ImportError:
         return PrintCheckResult(criterion="page_count", status="WARN", detail="pypdf not installed")
-    except Exception as e:
+    except (OSError, ValueError) as e:
         return PrintCheckResult(criterion="page_count", status="FAIL", detail=str(e))
     if actual == expected:
         return PrintCheckResult(criterion="page_count", status="PASS", detail=f"{actual} pages")
@@ -400,11 +401,11 @@ def _check_wrap_cover(
     try:
         with Image.open(wrap_png) as im:
             actual_w_px, actual_h_px = im.size
-    except Exception as e:
+    except OSError as e:
         return PrintCheckResult(criterion="wrap_cover", status="FAIL", detail=str(e))
     PX_PER_IN = 300
-    expected_w_px = int(round((bleed_in + trim_w_in + spine_in + trim_w_in + bleed_in) * PX_PER_IN))
-    expected_h_px = int(round((bleed_in + trim_h_in + bleed_in) * PX_PER_IN))
+    expected_w_px = round((bleed_in + trim_w_in + spine_in + trim_w_in + bleed_in) * PX_PER_IN)
+    expected_h_px = round((bleed_in + trim_h_in + bleed_in) * PX_PER_IN)
     # Tolerance: 1% of expected width
     if abs(actual_w_px - expected_w_px) <= max(10, int(0.01 * expected_w_px)) and abs(actual_h_px - expected_h_px) <= max(10, int(0.01 * expected_h_px)):
         return PrintCheckResult(
@@ -430,7 +431,7 @@ def _check_color_mode(p: Path) -> PrintCheckResult:
                 criterion="color_mode", status="FAIL",
                 detail=f"mode={mode}; CMYK or alpha not allowed for print",
             )
-    except Exception as e:
+    except OSError as e:
         return PrintCheckResult(criterion="color_mode", status="FAIL", detail=str(e))
 
 
@@ -460,7 +461,7 @@ def _check_cover_pdf(cover_pdf: Path) -> PrintCheckResult:
             criterion="cover_pdf", status="PASS",
             detail=f"single page {w_in:.3f}x{h_in:.3f}in",
         )
-    except Exception as e:
+    except (OSError, ValueError) as e:
         return PrintCheckResult(criterion="cover_pdf", status="FAIL", detail=str(e))
 
 
@@ -476,8 +477,8 @@ def _check_min_page_count(actual: int, min_pages: int = 24) -> PrintCheckResult:
 
 class PrintCheckStage(Stage):
     stage_name = "printcheck"
-    inputs = ["packages"]
-    outputs = ["printcheck"]
+    inputs: ClassVar = ["packages"]
+    outputs: ClassVar = ["printcheck"]
     prompt_version = "printcheck-v3"
     gate_verdict = "pass"
 
@@ -503,7 +504,7 @@ class PrintCheckStage(Stage):
         page_count = ctx.request.page_count
 
         # Read trim/bleed from the packaging config (same source as PackageStage)
-        trim_str = "8.5x8.5"
+        trim_str = "8.5x11"
         pack_profile = ctx.pack.profile
         if hasattr(pack_profile, "page_size") and pack_profile.page_size:
             trim_str = pack_profile.page_size
@@ -513,17 +514,24 @@ class PrintCheckStage(Stage):
                 trim_str = print_spec["page_size"]
         try:
             trim_w_in, trim_h_in = map(float, trim_str.lower().split("x"))
-        except Exception:
-            trim_w_in, trim_h_in = 8.5, 8.5
+        except ValueError:
+            trim_w_in, trim_h_in = 8.5, 11.0
 
-        bleed_in = 0.125
+        bleed_in = 0.0
         paper = "white"
         if isinstance(ctx.pack.packaging, dict):
             print_spec = ctx.pack.packaging.get("print", {})
-            bleed_in = float(print_spec.get("bleed_inches", 0.125))
+            bleed_in = float(print_spec.get("bleed_inches", 0.0))
             paper = print_spec.get("paper", "white") or "white"
 
         spine_in = _spine_width_inches(page_count, paper)
+
+        cover_spec = (
+            ctx.pack.packaging.get("cover", {})
+            if isinstance(ctx.pack.packaging, dict)
+            else {}
+        )
+        cover_bleed_in = float(cover_spec.get("bleed_inches", 0.125))
 
         page_assets = (
             sorted(ctx.processed_dir.glob("page_*.png")) if ctx.processed_dir.exists() else []
@@ -536,7 +544,7 @@ class PrintCheckStage(Stage):
         # 1. Interior dimensions + DPI + ink-safe margin + page count for EVERY interior PDF
         if interior_pdfs:
             for pdf in interior_pdfs:
-                r, aw, ah = _check_interior_dimensions(pdf, trim_w_in, trim_h_in, bleed_in)
+                r, _aw, _ah = _check_interior_dimensions(pdf, trim_w_in, trim_h_in, bleed_in)
                 results.append(r)
                 r, min_dpi = _check_interior_dpi_from_pdf(pdf, trim_w_in, trim_h_in, bleed_in, page_count)
                 results.append(r)
@@ -561,7 +569,7 @@ class PrintCheckStage(Stage):
         # Validate wrap cover PNG dimensions (was dead code — now called)
         if wrap_pngs:
             for wrap in wrap_pngs:
-                results.append(_check_wrap_cover(wrap, trim_w_in, trim_h_in, bleed_in, spine_in))
+                results.append(_check_wrap_cover(wrap, trim_w_in, trim_h_in, cover_bleed_in, spine_in))
         else:
             results.append(PrintCheckResult(criterion="wrap_cover", status="FAIL", detail="no wrap cover PNG found"))
 

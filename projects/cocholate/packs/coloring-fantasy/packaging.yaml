@@ -1,0 +1,11 @@
+digital:
+  page_size: 8.5x11
+  bleed_inches: 0.0
+  inner_safe_inches: 0.25
+print:
+  page_size: 8.5x11
+  bleed_inches: 0.0
+  inner_safe_inches: 0.375
+  paper: white
+cover:
+  bleed_inches: 0.125

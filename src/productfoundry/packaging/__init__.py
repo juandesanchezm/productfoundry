@@ -76,6 +76,27 @@ def ImageOps_fit(im: Image.Image, w: int, h: int) -> Image.Image:
     return im.resize((w, h), Image.LANCZOS)
 
 
+def ImageOps_contain(
+    im: Image.Image,
+    w: int,
+    h: int,
+    background: tuple[int, int, int] = (255, 255, 255),
+) -> Image.Image:
+    """Resize the complete source into a fixed canvas without cropping."""
+    source = im.convert("RGB")
+    scale = min(w / source.width, h / source.height)
+    size = (max(1, round(source.width * scale)), max(1, round(source.height * scale)))
+    resized = source.resize(size, Image.LANCZOS)
+    canvas = Image.new("RGB", (w, h), background)
+    canvas.paste(resized, ((w - resized.width) // 2, (h - resized.height) // 2))
+    return canvas
+
+
+def localized_age_label(language: str, age_range: str) -> str:
+    """Return the age badge copy in the requested language."""
+    return f"Edad {age_range}" if language.lower() == "es" else f"Ages {age_range}"
+
+
 def build_cover(
     title: str,
     subtitle: str,
@@ -216,8 +237,14 @@ def _draw_centered_text(
     fill: tuple[int, int, int] = (20, 20, 20),
     bg: tuple[int, int, int] | None = None,
     bg_padding: int = 20,
+    stroke_width: int = 0,
+    stroke_fill: tuple[int, int, int] = (255, 255, 255),
 ) -> None:
-    """Draw `text` centered at (cx, cy) with optional background box."""
+    """Draw `text` centered at (cx, cy) with optional background box or stroke.
+
+    A white stroke on dark text keeps the copy legible over any artwork
+    without an opaque white box.
+    """
     if not text:
         return
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -230,7 +257,14 @@ def _draw_centered_text(
             cy + th // 2 + bg_padding,
         ]
         draw.rectangle(box, fill=bg)
-    draw.text((cx - tw // 2, cy - th // 2), text, fill=fill, font=font)
+    draw.text(
+        (cx - tw // 2, cy - th // 2),
+        text,
+        fill=fill,
+        font=font,
+        stroke_width=stroke_width,
+        stroke_fill=stroke_fill,
+    )
 
 
 def _paste_or_white(
@@ -281,6 +315,70 @@ def _wrap_text_lines(
     return out
 
 
+def _fit_font(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_path: str,
+    max_w: int,
+    start_size: int,
+) -> ImageFont.FreeTypeFont:
+    """Pick the largest size of `font_path` whose rendered width fits max_w."""
+    size = start_size
+    while size > 24:
+        try:
+            font = ImageFont.truetype(font_path, size)
+        except OSError:
+            break
+        bbox = draw.textbbox((0, 0), text, font=font)
+        if bbox[2] - bbox[0] <= max_w:
+            return font
+        size -= 8
+    return ImageFont.load_default()
+
+
+def _draw_text_with_shadow(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    cx: int,
+    cy: int,
+    fill: tuple[int, int, int],
+    shadow_offset: int = 6,
+    stroke_width: int = 0,
+    stroke_fill: tuple[int, int, int] = (255, 255, 255),
+) -> None:
+    """Draw text centered at (cx, cy) with a soft drop shadow and optional
+    white outline. No opaque box: the artwork stays visible."""
+    if not text:
+        return
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    x, y = cx - tw // 2, cy - th // 2
+    # Drop shadow first (offset copy in a translucent dark tone)
+    shadow = tuple(int(c * 0.45) for c in fill)
+    draw.text(
+        (x + shadow_offset, y + shadow_offset), text, fill=shadow,
+        font=font, stroke_width=stroke_width, stroke_fill=shadow,
+    )
+    draw.text(
+        (x, y), text, fill=fill, font=font,
+        stroke_width=stroke_width, stroke_fill=stroke_fill,
+    )
+
+
+def _draw_rounded_panel(
+    canvas: Image.Image,
+    box: tuple[int, int, int, int],
+    radius: int,
+    fill: tuple[int, int, int, int],
+) -> None:
+    """Draw a translucent rounded panel (soft sign/banner look) on `canvas`."""
+    overlay = Image.new("RGBA", (box[2] - box[0], box[3] - box[1]), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rounded_rectangle((0, 0, overlay.width - 1, overlay.height - 1), radius=radius, fill=fill)
+    canvas.paste(overlay, (box[0], box[1]), overlay)
+
+
 def build_wrap_cover(
     title: str,
     subtitle: str,
@@ -295,19 +393,26 @@ def build_wrap_cover(
     text_color: tuple[int, int, int] = (30, 30, 50),
     bg_image_path: Path | None = None,
     hero_image_path: Path | None = None,
+    back_image_path: Path | None = None,
     thumbnail_paths: list[Path] | None = None,
     age_range: str = "",
-    title_in_artwork: bool = False,
+    language: str = "en",
+    title_in_artwork: bool = True,
 ) -> Path:
     """Build a full KDP wrap cover (back + spine + front) with bleed.
 
     Layout (left to right): bleed | back | spine | front | bleed
     Height (top to bottom): bleed | trim | bleed
 
-    Back: up to 4 interior-page thumbnails in a 2x2 grid at the top, the blurb
-    in the middle, and a barcode placeholder at the bottom.
-    Front: hero artwork (or bg image) with the title in a soft white pill
-    (Baloo 2 rounded display font) and an optional age badge ("Ages 3-8").
+    Front: the localized hero artwork whose text zone already contains the
+    exact title, subtitle, age badge and author rendered by the image model.
+    When the artwork does not carry the copy (title_in_artwork=False), the
+    copy is composed deterministically with a white stroke — no opaque boxes.
+    Back: one shared model-generated background (no character, no text) with
+    SIX interior-page thumbnails (3 rows x 2 columns, large and centered)
+    filling the upper area; the bottom strip (1.5in) is left as artwork so
+    KDP places its ISBN barcode automatically. No blurb text and no barcode
+    box are drawn.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     trim_w_in, trim_h_in = map(float, page_size.lower().split("x"))
@@ -331,10 +436,8 @@ def build_wrap_cover(
     fonts = _load_fonts()
     title_font = fonts["title"]
     subtitle_font = fonts["subtitle"]
-    body_font = fonts["body"]
-    author_font = fonts["author"]
 
-    # Front: hero artwork (or bg image) or plain white
+    # Front: the localized hero artwork (title/copy embedded by the model).
     front_bg = hero_image_path or bg_image_path
     if front_bg and front_bg.exists():
         with Image.open(front_bg) as im:
@@ -344,7 +447,7 @@ def build_wrap_cover(
         draw = ImageDraw.Draw(canvas)
         draw.rectangle(front_box, fill=bg_color)
 
-    # Spine and back: plain white
+    # Spine: plain white
     _paste_or_white(
         canvas,
         (spine_x0, bleed_px, spine_x1, bleed_px + trim_h_px),
@@ -352,173 +455,108 @@ def build_wrap_cover(
         (spine_in, trim_h_in),
         bg_color,
     )
-    _paste_or_white(
-        canvas,
-        back_box,
-        None,
-        (trim_w_in, trim_h_in),
-        bg_color,
-    )
+
+    # Back: shared model-generated background (no character, no text)
+    if back_image_path and back_image_path.exists():
+        with Image.open(back_image_path) as im:
+            back_art = ImageOps_fit(im, trim_w_px, trim_h_px)
+        canvas.paste(back_art, back_box)
+    else:
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle(back_box, fill=bg_color)
 
     draw = ImageDraw.Draw(canvas)
 
-    # ---- Front: title + subtitle stacked towards the bottom (so the artwork is the hero)
-    front_cx = front_x0 + trim_w_px // 2
-    front_bottom = bleed_px + trim_h_px - int(_inches_to_pixels(0.6))
+    # ---- Front overlay: only when the artwork does NOT contain the copy.
     if not title_in_artwork:
-        # Title in a soft white pill. When the hero already contains the exact
-        # localized title, the wrapper must not duplicate it.
-        title_bg_pad_x = 28
-        title_bg_pad_y = 14
-        bbox = draw.textbbox((0, 0), title, font=title_font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        title_box = [
-            front_cx - tw // 2 - title_bg_pad_x,
-            front_bottom - th - 2 * title_bg_pad_y,
-            front_cx + tw // 2 + title_bg_pad_x,
-            front_bottom,
-        ]
-        draw.rectangle(title_box, fill=(255, 255, 255, 230))
-        draw.text(
-            (front_cx - tw // 2, front_bottom - th - title_bg_pad_y),
-            title,
-            fill=text_color,
-            font=title_font,
+        front_cx = front_x0 + trim_w_px // 2
+        panel_w = int(trim_w_px * 0.86)
+        panel_top = bleed_px + int(_inches_to_pixels(0.35))
+        panel_bottom = bleed_px + int(_inches_to_pixels(1.35))
+        # Fitted display fonts for the title and subtitle
+        font_dir = Path(__file__).resolve().parents[3] / "assets" / "fonts"
+        title_font_path = font_dir / "Baloo2-Bold.ttf"
+        subtitle_font_path = font_dir / "Quicksand-Bold.ttf"
+        try:
+            title_font = _fit_font(draw, title, str(title_font_path), panel_w - 40, 150)
+        except OSError:
+            title_font = fonts["title"]
+        try:
+            subtitle_font = _fit_font(draw, subtitle, str(subtitle_font_path), panel_w - 60, 44) if subtitle else None
+        except OSError:
+            subtitle_font = fonts["subtitle"] if subtitle else None
+        # Layout inside the panel: title, subtitle, author (age badge below)
+        title_h = title_font.size
+        subtitle_h = subtitle_font.size if subtitle_font else 0
+        author_h = fonts["author"].size
+        badge_h = fonts["body"].size if age_range else 0
+        total_h = title_h + subtitle_h + author_h + badge_h + 4 * int(_inches_to_pixels(0.1))
+        y = panel_top + (panel_bottom - panel_top - total_h) // 2
+        # Translucent rounded panel (soft banner look, artwork stays visible)
+        _draw_rounded_panel(
+            canvas,
+            (front_cx - panel_w // 2, panel_top, front_cx + panel_w // 2, panel_bottom),
+            radius=48,
+            fill=(255, 255, 255, 150),
         )
-
-        # Subtitle below the title (no background)
-        if subtitle:
-            bbox = draw.textbbox((0, 0), subtitle, font=subtitle_font)
-            sw = bbox[2] - bbox[0]
-            sub_y = front_bottom + 20
-            draw.text((front_cx - sw // 2, sub_y), subtitle, fill=text_color, font=subtitle_font)
-
-    # Age badge in the top-right corner of the front (bestseller convention)
-    if age_range:
-        badge_text = f"Ages {age_range}"
-        badge_font = fonts["subtitle"]
-        bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
-        bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        pad = 12
-        badge_x1 = front_box[2] - int(_inches_to_pixels(0.25))
-        badge_y0 = front_box[1] + int(_inches_to_pixels(0.25))
-        draw.rounded_rectangle(
-            [badge_x1 - bw - 2 * pad, badge_y0, badge_x1, badge_y0 + bh + 2 * pad],
-            radius=pad,
-            fill=(255, 255, 255),
-            outline=text_color,
-            width=2,
+        y += title_h // 2
+        _draw_text_with_shadow(
+            draw, title, title_font, front_cx, y,
+            fill=text_color, shadow_offset=5, stroke_width=4, stroke_fill=(255, 255, 255),
         )
-        draw.text((badge_x1 - bw - pad, badge_y0 + pad), badge_text, fill=text_color, font=badge_font)
+        if subtitle_font:
+            y += title_h // 2 + subtitle_h // 2 + int(_inches_to_pixels(0.05))
+            _draw_text_with_shadow(
+                draw, subtitle, subtitle_font, front_cx, y,
+                fill=(90, 70, 40), shadow_offset=3, stroke_width=2, stroke_fill=(255, 255, 255),
+            )
+        if author:
+            y += subtitle_h // 2 + author_h // 2 + int(_inches_to_pixels(0.1))
+            _draw_text_with_shadow(
+                draw, author, fonts["author"], front_cx, y,
+                fill=text_color, shadow_offset=4, stroke_width=3, stroke_fill=(255, 255, 255),
+            )
+        if age_range:
+            y += author_h // 2 + badge_h // 2 + int(_inches_to_pixels(0.08))
+            _draw_text_with_shadow(
+                draw, localized_age_label(language, age_range), fonts["body"], front_cx, y,
+                fill=text_color, shadow_offset=3, stroke_width=2, stroke_fill=(255, 255, 255),
+            )
 
-    # ---- Spine: title + author rotated (text reads top-to-bottom)
-    if spine_px > 0:
-        # Create a tall, narrow label that will be rotated 90°. After rotation,
-        # the label's height becomes its width (which must fit within spine_px)
-        # and its width becomes its height (which must fit within trim_h_px).
-        label_h_px = max(8, spine_px)  # becomes width after rotation
-        label_w_px = max(80, _inches_to_pixels(trim_h_in * 0.7))  # becomes height after rotation
-        label = Image.new("RGB", (label_w_px, label_h_px), bg_color)
-        label_draw = ImageDraw.Draw(label)
-        spine_text = f"{title} • {author}"
-        bbox = label_draw.textbbox((0, 0), spine_text, font=body_font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        # Center text in the label (before rotation)
-        label_draw.text(
-            ((label_w_px - tw) // 2, (label_h_px - th) // 2),
-            spine_text,
-            fill=text_color,
-            font=body_font,
-        )
-        rotated = label.rotate(90, expand=True)
-        rot_w, rot_h = rotated.size
-        spine_cy = bleed_px + trim_h_px // 2
-        # Clamp the rotated label to the spine area to prevent overflow
-        paste_x = spine_x0 + max(0, (spine_px - rot_w) // 2)
-        paste_y = max(bleed_px, spine_cy - rot_h // 2)
-        canvas.paste(rotated, (paste_x, paste_y))
-
-    # ---- Back: thumbnails at top, author, blurb in the middle, barcode at bottom
+    # ---- Back: 3 rows x 2 columns of large, centered thumbnails.
+    # The grid fills the upper area and leaves the bottom ~1.5in as artwork
+    # so KDP can place its ISBN barcode automatically.
     back_x0 = back_box[0]
     back_cx = back_x0 + trim_w_px // 2
-    back_pad = int(_inches_to_pixels(0.4))
+    barcode_zone_in = 1.5
+    grid_top_in = 0.4
+    grid_bottom_in = trim_h_in - barcode_zone_in
 
-    # Thumbnail grid 2x2 (up to 4 interior pages) at the top of the back cover
-    thumb_y = bleed_px + int(_inches_to_pixels(0.5))
-    if thumbnail_paths:
-        thumbs = [p for p in thumbnail_paths if p.exists()][:4]
-        if thumbs:
-            gap = int(_inches_to_pixels(0.15))
-            thumb_w = (trim_w_px - 2 * back_pad - gap) // 2
-            thumb_h = int(thumb_w * 0.9)  # slightly shorter than wide
-            for i, tp in enumerate(thumbs):
-                col = i % 2
-                row = i // 2
-                x0 = back_x0 + back_pad + col * (thumb_w + gap)
-                y0 = thumb_y + row * (thumb_h + gap)
-                with Image.open(tp) as im:
-                    t = ImageOps_fit(im, thumb_w, thumb_h)
-                canvas.paste(t, (x0, y0))
-                draw.rectangle([x0, y0, x0 + thumb_w, y0 + thumb_h], outline=(200, 200, 200), width=2)
-            thumb_bottom = thumb_y + 2 * (thumb_h + gap) - gap
-        else:
-            thumb_bottom = thumb_y
-    else:
-        thumb_bottom = thumb_y
-
-    # Author below the thumbnails, bold
-    author_y = thumb_bottom + int(_inches_to_pixels(0.25))
-    if author:
-        bbox = draw.textbbox((0, 0), author, font=author_font)
-        aw, ah = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        ax_pad = 16
-        draw.rectangle(
-            [
-                back_cx - aw // 2 - ax_pad,
-                author_y - ax_pad,
-                back_cx + aw // 2 + ax_pad,
-                author_y + ah + ax_pad,
-            ],
-            fill=(255, 255, 255),
-        )
-        draw.text((back_cx - aw // 2, author_y), author, fill=text_color, font=author_font)
-
-    # Blurb in the middle (between author and barcode)
-    blurb_max_w_px = trim_w_px - 2 * back_pad
-    blurb_lines = _wrap_text_lines(back_blurb, body_font, blurb_max_w_px)
-    line_height = body_font.size + 8
-    blurb_total_h = line_height * len(blurb_lines)
-    bc_h_px = _inches_to_pixels(0.7)
-    bc_y = bleed_px + trim_h_px - bc_h_px - int(_inches_to_pixels(0.3))
-    blurb_zone_top = author_y + int(_inches_to_pixels(0.4))
-    blurb_zone_bottom = bc_y - int(_inches_to_pixels(0.3))
-    blurb_y_start = blurb_zone_top + (blurb_zone_bottom - blurb_zone_top - blurb_total_h) // 2
-    # Truncate to fit the zone
-    max_lines = max(4, (blurb_zone_bottom - blurb_zone_top) // line_height)
-    if len(blurb_lines) > max_lines:
-        blurb_lines = blurb_lines[:max_lines]
-        blurb_lines[-1] = (blurb_lines[-1][0] + "...", blurb_lines[-1][1])
-    for i, (line, _) in enumerate(blurb_lines):
-        bbox = draw.textbbox((0, 0), line, font=body_font)
-        lw = bbox[2] - bbox[0]
-        y = blurb_y_start + i * line_height
-        bx_pad = 8
-        draw.rectangle(
-            [
-                back_cx - lw // 2 - bx_pad,
-                y - bx_pad,
-                back_cx + lw // 2 + bx_pad,
-                y + line_height - bx_pad,
-            ],
-            fill=(255, 255, 255),
-        )
-        draw.text((back_cx - lw // 2, y), line, fill=text_color, font=body_font)
-
-    # Reserve the KDP barcode area by leaving it blank. KDP inserts a real
-    # barcode from the ISBN metadata; drawing synthetic bars is misleading.
-    bc_w_px = _inches_to_pixels(1.5)
-    bc_x = back_cx - bc_w_px // 2
-    draw.rectangle([bc_x, bc_y, bc_x + bc_w_px, bc_y + bc_h_px], fill=(255, 255, 255))
+    thumbs = [p for p in (thumbnail_paths or []) if p.exists()][:6]
+    if thumbs:
+        cols, rows = 2, 3
+        gap_in = 0.18
+        avail_w = trim_w_in - 2 * 0.5
+        avail_h = grid_bottom_in - grid_top_in
+        thumb_w_in = (avail_w - (cols - 1) * gap_in) / cols
+        thumb_h_in = (avail_h - (rows - 1) * gap_in) / rows
+        thumb_w = _inches_to_pixels(thumb_w_in)
+        thumb_h = _inches_to_pixels(thumb_h_in)
+        gap = _inches_to_pixels(gap_in)
+        # Center the whole 3x2 grid vertically in the available area
+        grid_h = rows * thumb_h + (rows - 1) * gap
+        grid_y0 = bleed_px + int(_inches_to_pixels(grid_top_in)) + (int(_inches_to_pixels(avail_h)) - grid_h) // 2
+        grid_w = cols * thumb_w + (cols - 1) * gap
+        grid_x0 = back_cx - grid_w // 2
+        for i, tp in enumerate(thumbs):
+            col = i % cols
+            row = i // cols
+            x0 = grid_x0 + col * (thumb_w + gap)
+            y0 = grid_y0 + row * (thumb_h + gap)
+            with Image.open(tp) as im:
+                t = ImageOps_contain(im, thumb_w, thumb_h, background=bg_color)
+            canvas.paste(t, (x0, y0))
+            draw.rectangle([x0, y0, x0 + thumb_w, y0 + thumb_h], outline=(200, 200, 200), width=2)
 
     canvas.save(out_path, "PNG", optimize=True)
     return out_path
