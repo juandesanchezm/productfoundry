@@ -471,7 +471,8 @@ def test_hero_prompt_requires_the_exact_english_title_and_official_colors():
     prompt = _build_hero_prompt(plan, pack, "en", "magical-day")
 
     assert "Cocholate's Magical Day" in prompt
-    assert "A Coloring Adventure" in prompt
+    assert "Cocholate's Adventures" in prompt
+    assert "A Coloring Adventure" not in prompt
     assert "Noa Bloom" in prompt
     assert "Ages 3-8" in prompt
     assert "text zone" in prompt.lower()

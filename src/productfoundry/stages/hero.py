@@ -24,7 +24,7 @@ from productfoundry.providers import ImageGenerationRequest
 from productfoundry.providers.pricing import image_cost_usd
 from productfoundry.series import canonical_character_reference
 from productfoundry.stages.audit import _audit_single_image, _is_audit_enabled
-from productfoundry.stages.story_helpers import localized_series_name, localized_story_subtitle
+from productfoundry.stages.story_helpers import localized_series_name
 
 PROMPT_VERSION = "hero-v4"
 
@@ -50,7 +50,6 @@ def _official_palette(pack) -> str:
 def _build_hero_prompt(plan: ProductPlan, pack, language: str = "en", story_id: str = "") -> str:
     """Prompt for the single shared cover artwork (English copy embedded)."""
     title = plan.titles.get(language) or plan.titles.get("en") or plan.theme.capitalize()
-    subtitle = localized_story_subtitle(pack, story_id, language, plan.subtitle)
     age_badge = localized_age_label(language, getattr(pack.profile, "age_range", "") or "")
     author = _get_author(pack)
     series = localized_series_name(pack, language)
@@ -77,8 +76,6 @@ def _build_hero_prompt(plan: ProductPlan, pack, language: str = "en", story_id: 
         parts.append(f"The protagonist's official colors MUST be: {palette}. Keep them exactly.")
 
     copy_lines = [title]
-    if subtitle:
-        copy_lines.append(subtitle)
     if series:
         copy_lines.append(series)
     if age_badge:
@@ -176,9 +173,7 @@ class HeroStage(Stage):
         age_badge = localized_age_label(language, getattr(ctx.pack.profile, "age_range", "") or "")
         return {
             "expected_title": concept.titles.get(language, concept.titles.get("en", ctx.request.theme)),
-            "expected_subtitle": localized_story_subtitle(
-                ctx.pack, ctx.request.story_id, language, concept.subtitle
-            ),
+            "expected_subtitle": localized_series_name(ctx.pack, language),
             "expected_age_badge": age_badge,
             "expected_author": _get_author(ctx.pack),
         }

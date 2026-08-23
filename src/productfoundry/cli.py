@@ -273,7 +273,7 @@ def create(
     pack: str = typer.Option(..., "--pack", help="Pack id"),
     theme: str = typer.Option(..., "--theme", help="Theme/sub-niche or story id"),
     pages: int | None = typer.Option(None, "--pages", help="Number of pages to generate (defaults to the pack)"),
-    languages: str = typer.Option("en,es", "--languages", help="Comma-separated languages"),
+    languages: str = typer.Option("en", "--languages", help="Comma-separated languages"),
     formats: str = typer.Option("digital,print", "--formats", help="Comma-separated formats"),
     title_hint: str = typer.Option("", "--title-hint", help="Optional title hint"),
     runtime: Path | None = typer.Option(None, "--runtime", help="Path to runtime yaml"),
