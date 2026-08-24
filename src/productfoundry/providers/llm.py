@@ -196,7 +196,6 @@ class PlaceholderLLMClient:
                     for i in range(count)
                 ],
                 "titles": {"en": "Placeholder EN", "es": "Placeholder ES"},
-                "subtitle": "placeholder subtitle",
                 "description_hint": "placeholder description hint",
             }
         return LLMResponse(content=json.dumps(payload), raw={"prompt_eval_count": 1, "eval_count": 1})

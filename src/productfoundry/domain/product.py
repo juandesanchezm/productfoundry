@@ -51,5 +51,4 @@ class ProductPlan(BaseModel):
     theme: str
     pages: list[PageSpec] = Field(default_factory=list)
     titles: dict[str, str] = Field(default_factory=dict)  # language -> title
-    subtitle: str = ""
     description_hint: str = ""

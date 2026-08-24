@@ -72,7 +72,7 @@ class LLMClient:
             model or self.model,
             messages,
             api_key=self.api_key,
-            format_json=False,
+            format_json=True,
         )
 
 

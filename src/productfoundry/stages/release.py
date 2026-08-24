@@ -70,7 +70,10 @@ class ReleaseStage(Stage):
                 continue
             for p in sorted(root.rglob("*")):
                 if p.is_file():
-                    deliverable_hashes.append(sha256_text(p.read_bytes() if p.stat().st_size < 2_000_000 else p.name))
+                    if p.stat().st_size < 2_000_000:
+                        deliverable_hashes.append(sha256_text(p.read_text(errors="replace")))
+                    else:
+                        deliverable_hashes.append(sha256_text(p.name + ":" + str(p.stat().st_size)))
         return [marker_content, "|".join(gate_hashes), "|".join(deliverable_hashes)]
 
     def expected_output_files(self, ctx: StageContext) -> list[Path] | None:

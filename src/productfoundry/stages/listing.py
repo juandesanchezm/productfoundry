@@ -11,7 +11,7 @@ from productfoundry.domain.packaging import PackagePlan
 from productfoundry.domain.product import ProductPlan
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.stages.helpers import estimate_cost, retry_parse
-from productfoundry.stages.story_helpers import localized_series_name, localized_story_subtitle
+from productfoundry.stages.story_helpers import localized_series_name
 
 PROMPT_VERSION = "listing-v3"
 _SYSTEM = "Eres un experto en SEO para marketplaces digitales. Genera SOLO JSON."
@@ -74,7 +74,6 @@ def _build_prompt(
 ) -> str:
     profile = getattr(pack, "profile", pack)
     series_line = ""
-    subtitle_lines = ""
     combinations: list[str] = []
     formats_obj = getattr(profile, "formats", None)
     for fmt in formats:
@@ -88,9 +87,6 @@ def _build_prompt(
         series = localized_series_name(pack, lang)
         if series:
             series_line += f"\nSerie ({lang}): {series}"
-        subtitle = localized_story_subtitle(pack, story_id, lang, plan.subtitle)
-        if subtitle:
-            subtitle_lines += f"\nSubtítulo ({lang}): {subtitle}"
     combinations_block = "\n".join(f"- {key}" for key in combinations)
     return f"""Genera listings SEO para este producto.
 
@@ -100,7 +96,7 @@ Páginas: {len(plan.pages)}
 Idiomas: {", ".join(languages)}
 Formatos: {", ".join(formats)}
 Título (en): {plan.titles.get("en", "")}
-Título (es): {plan.titles.get("es", "")}{subtitle_lines}
+Título (es): {plan.titles.get("es", "")}
 Pista: {plan.description_hint}{series_line}
 
 Combinaciones obligatorias (debes cubrir TODAS):

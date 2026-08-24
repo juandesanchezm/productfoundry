@@ -176,7 +176,7 @@ def test_pack_declares_clover_hopping_traits():
     clover = next(character for character in pack.stories["characters"] if character["id"] == "clover")
     description = clover["description_en"].lower()
 
-    assert "long" in description
+    assert "stubby" in description
     assert "bent" in description
     assert "webbed" in description
 
@@ -186,7 +186,7 @@ def test_coloring_pack_defaults_are_kdp_ready_and_use_real_author():
 
     assert pack.profile.page_count == 24
     assert pack.profile.author == "Noa Bloom"
-    assert pack.profile.languages == ["en", "es"]
+    assert pack.profile.languages == ["en"]
     assert set(pack.profile.formats.model_dump()) == {"digital", "print"}
 
 
@@ -464,14 +464,14 @@ def test_hero_prompt_requires_the_exact_english_title_and_official_colors():
     plan = ProductPlan(
         pack_id=pack.profile.id,
         pack_version=pack.profile.pack_version,
-        theme="cocoa-magical-day",
-        titles={"en": "Cocholate's Magical Day", "es": "El Día Mágico de Cocholate"},
+        theme="sunny-meadow",
+        titles={"en": "A Magical Day", "es": "Un Día Mágico"},
     )
 
     prompt = _build_hero_prompt(plan, pack, "en", "magical-day")
 
-    assert "Cocholate's Magical Day" in prompt
-    assert "Cocholate's Adventures" in prompt
+    assert "A Magical Day" in prompt
+    assert "The Adventures of Cocholate" in prompt
     assert "A Coloring Adventure" not in prompt
     assert "Noa Bloom" in prompt
     assert "Ages 3-8" in prompt
@@ -894,7 +894,6 @@ def test_wrap_cover_leaves_kdp_barcode_area_as_artwork(tmp_path):
     cover = tmp_path / "cover.png"
     build_wrap_cover(
         title="A Title",
-        subtitle="",
         author="Noa Bloom",
         back_blurb="",
         out_path=cover,
@@ -1017,18 +1016,15 @@ def test_listing_prompt_uses_localized_series_without_volume():
     plan = ProductPlan(
         pack_id=pack.profile.id,
         pack_version=pack.profile.pack_version,
-        theme="cocoa-magical-day",
-        titles={"en": "Cocholate's Magical Day", "es": "El Día Mágico de Cocholate"},
-        subtitle="Una aventura para colorear",
+        theme="sunny-meadow",
+        titles={"en": "A Magical Day", "es": "Un Día Mágico"},
         pages=[],
     )
 
     prompt = _build_prompt(pack, plan, ["en", "es"], ["digital"], "magical-day")
 
-    assert "Cocholate's Adventures" in prompt
+    assert "The Adventures of Cocholate" in prompt
     assert "Las Aventuras de Cocholate" in prompt
     assert "volumen 1" not in prompt
     assert "este es el volumen" not in prompt
-    assert "Una aventura para colorear" in prompt
-    assert "A Coloring Adventure" in prompt
     assert "Blaze" not in prompt

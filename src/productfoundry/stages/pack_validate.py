@@ -52,7 +52,7 @@ def validate_forbidden_marketing_values(pack) -> list[str]:
         story_list = stories.get("stories", [])
         for story in story_list if isinstance(story_list, list) else []:
             if isinstance(story, dict):
-                for key in ("title_en", "title_es", "subtitle_en", "subtitle_es"):
+                for key in ("title_en", "title_es"):
                     haystack.append(str(story.get(key, "")))
     for marker in markers:
         for text in haystack:

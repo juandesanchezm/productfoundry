@@ -66,6 +66,7 @@ class PublicationManifest(BaseModel):
     created_at: str = ""
     files: list[ManifestFile] = Field(default_factory=list)
     gates: list[GateRecord] = Field(default_factory=list)
+    deliverables_fingerprint: str = ""
     author: str = ""
     ai_disclosure_ready: bool = False
     compliance_ready: bool = False

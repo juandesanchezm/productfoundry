@@ -16,7 +16,6 @@ from productfoundry.packaging import (
     build_wrap_cover,
     build_zip,
 )
-from productfoundry.stages.story_helpers import localized_story_subtitle
 
 PROMPT_VERSION = "package-v4"
 
@@ -153,7 +152,6 @@ def build_packages(
                     / f"{plan.pack_id}-{request_theme}-{marketplace}-cover.png"
                 )
                 title = plan.titles.get(lang, plan.titles.get("en", request_theme))
-                subtitle = localized_story_subtitle(pack, request_story_id, lang, plan.subtitle)
                 blurb = _get_description_blurb(pack, plan, lang, story)
                 hero_img = assets_dir / f"cover_hero_{lang}.png"
                 if not hero_img.exists():
@@ -170,7 +168,6 @@ def build_packages(
                     back_img = assets_dir / "back_cover_en.png"
                 build_wrap_cover(
                     title=title,
-                    subtitle=subtitle,
                     author=author,
                     back_blurb=blurb,
                     out_path=wrap_path,

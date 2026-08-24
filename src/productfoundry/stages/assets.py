@@ -214,6 +214,7 @@ class AssetsStage(Stage):
                 path = ctx.assets_dir / f"{a.id}.png"
                 if path.exists():
                     path.unlink()
+        ctx.assets_dir.mkdir(parents=True, exist_ok=True)
         marker.write_text(design_hash)
 
         audit_enabled = _is_audit_enabled(ctx.pack)

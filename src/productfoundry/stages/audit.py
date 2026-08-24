@@ -141,10 +141,11 @@ Characterization (the character MUST match this exactly):
 Evaluate only the listed traits; do not invent additional requirements that are
 not present in the characterization.
 This is black-and-white line art: do not fail because color is not visible.
+The palette is descriptive only; the line-art sheet is NOT expected to be colored.
 
 Check that the image matches the characterization:
 - Species/type matches (e.g. a baby animal, not a different creature)
-- Key physical traits present (colors, wings, tail, ears, size proportions)
+- Key physical traits present (wings, tail, horns, antennae, size proportions)
 - Style matches (cute proportions, friendly expression)
 - Full body visible, front view, neutral pose
 - No text, no watermark, no extra characters
@@ -194,7 +195,7 @@ separated text zone (a sign, banner, cloud, arch or frame). The expected copy
 is given below; verify it letter by letter, including accents and punctuation.
 
 Expected title: {expected_title}
-Expected subtitle: {expected_subtitle}
+Expected series: {expected_series}
 Expected age badge: {expected_age_badge}
 Expected author name: {expected_author}
 
@@ -204,7 +205,7 @@ Check:
   proportions, and official colors when specified)
 - The composition has a clearly separated text zone (sign, banner, cloud, arch or frame)
 - The text inside that zone is a single language, fully readable, WITHOUT spelling
-  errors, and matches the expected copy EXACTLY (title, subtitle, age badge, author)
+  errors, and matches the expected copy EXACTLY (title, series, age badge, author)
 - NO extra words, letters, watermark, or signature anywhere else in the image
 - The image is vibrant and appealing (not dull, dark, or scary)
 - No anatomical artifacts (extra limbs, distorted features)
@@ -254,7 +255,12 @@ def _coerce_status(raw: str) -> str:
 
 
 def _parse_judge_json(content: str) -> dict:
-    """Parse a judge response while tolerating harmless wrapper text."""
+    """Parse a judge response while tolerating harmless wrapper text.
+
+    The vision model occasionally truncates the leading `{"` of the JSON
+    object. Reconstruct it before giving up; a genuinely unparseable
+    response still raises and is treated as a failure by the caller.
+    """
     cleaned = _strip_json_fence(content)
     try:
         return json.loads(cleaned)
@@ -262,6 +268,12 @@ def _parse_judge_json(content: str) -> dict:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start < 0 or end <= start:
+            # Truncated leading brace: `status": "ok", ...}` → `{"status": ...}`
+            if cleaned.lstrip().startswith('"') and end > 0:
+                try:
+                    return json.loads("{" + cleaned[: end + 1])
+                except json.JSONDecodeError:
+                    pass
             raise
         return json.loads(cleaned[start : end + 1])
 
@@ -272,7 +284,7 @@ def _complete_with_image_json(
     user: str,
     image_b64: str,
     model: str,
-    max_attempts: int = 2,
+    max_attempts: int = 3,
 ) -> dict | None:
     """Retry malformed vision-judge output without regenerating the image."""
     for _ in range(max_attempts):
@@ -394,7 +406,7 @@ def _audit_single_image(
             characterization=characterization,
             audience=audience,
             expected_title=getattr(asset, "expected_title", "") or "",
-            expected_subtitle=getattr(asset, "expected_subtitle", "") or "",
+            expected_series=getattr(asset, "expected_series", "") or "",
             expected_age_badge=getattr(asset, "expected_age_badge", "") or "",
             expected_author=getattr(asset, "expected_author", "") or "",
         )

@@ -41,9 +41,9 @@ def test_resolve_book_synthesizes_pack_contract():
     )
 
     assert bundle.pack.profile.author == "Noa Bloom"
-    assert bundle.pack.profile.series_name["en"] == "Cocholate's Adventures"
+    assert bundle.pack.profile.series_name["en"] == "The Adventures of Cocholate"
     assert bundle.pack.stories["stories"][0]["id"] == "magical-day"
-    assert bundle.pack.stories["stories"][0]["title_en"] == "Cocholate's Magical Day"
+    assert bundle.pack.stories["stories"][0]["title_en"] == "A Magical Day"
     assert len(bundle.pack.stories["stories"][0]["arc"]) == 24
     main = next(c for c in bundle.pack.stories["characters"] if c["role"] == "main")
     assert main["id"] == "cocholate"

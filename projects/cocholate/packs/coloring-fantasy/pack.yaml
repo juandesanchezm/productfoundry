@@ -5,7 +5,6 @@ pack_type: coloring
 default_language: en
 languages:
   - en
-  - es
 formats:
   digital:
     marketplaces:
@@ -21,5 +20,5 @@ author: "Noa Bloom"
 audience: "Parents of kids 3-8 years old"
 age_range: "3-8"
 series_name:
-  en: "Cocholate's Adventures"
+  en: "The Adventures of Cocholate"
   es: "Las Aventuras de Cocholate"

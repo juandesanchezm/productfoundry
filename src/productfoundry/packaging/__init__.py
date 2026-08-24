@@ -99,7 +99,6 @@ def localized_age_label(language: str, age_range: str) -> str:
 
 def build_cover(
     title: str,
-    subtitle: str,
     out_path: Path,
     page_size: str = "8.5x11",
     bg_color: tuple[int, int, int] = (255, 255, 255),
@@ -120,7 +119,6 @@ def build_cover(
 
     draw = ImageDraw.Draw(canvas)
     title_font = ImageFont.load_default(80)
-    sub_font = ImageFont.load_default(40)
 
     if title:
         bbox = draw.textbbox((0, 0), title, font=title_font)
@@ -129,11 +127,6 @@ def build_cover(
         box = [w // 2 - tw // 2 - pad, h // 2 - th // 2 - pad, w // 2 + tw // 2 + pad, h // 2 + th // 2 + pad]
         draw.rectangle(box, fill=(255, 255, 255, 230))
         draw.text((w // 2 - tw // 2, h // 2 - th // 2), title, fill=text_color, font=title_font)
-
-    if subtitle:
-        bbox = draw.textbbox((0, 0), subtitle, font=sub_font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text((w // 2 - tw // 2, h // 2 + 80), subtitle, fill=text_color, font=sub_font)
 
     canvas.save(out_path, "PNG", optimize=True)
     return out_path
@@ -169,7 +162,7 @@ def _wrap_canvas(
 
 
 def _load_fonts() -> dict[str, ImageFont.FreeTypeFont]:
-    """Load display fonts at TTF. Returns dict with 'title', 'subtitle', 'body', 'author'.
+    """Load display fonts at TTF. Returns dict with 'title', 'body', 'author'.
 
     Baloo 2 (rounded, playful) for titles — the standard look of kids' book
     bestsellers. Quicksand (soft geometric) for body text. Falls back to
@@ -178,11 +171,10 @@ def _load_fonts() -> dict[str, ImageFont.FreeTypeFont]:
     font_dir = Path(__file__).resolve().parents[3] / "assets" / "fonts"
     candidates = {
         "title": ["Baloo2-Bold.ttf", "LiberationSans-Bold.ttf"],
-        "subtitle": ["Quicksand-Bold.ttf", "LiberationSans-Bold.ttf"],
         "body": ["Quicksand-Regular.ttf", "LiberationSans-Regular.ttf"],
         "author": ["Baloo2-Bold.ttf", "LiberationSans-Bold.ttf"],
     }
-    sizes = {"title": 96, "subtitle": 36, "body": 28, "author": 32}
+    sizes = {"title": 96, "body": 28, "author": 32}
     fonts: dict[str, ImageFont.FreeTypeFont] = {}
     for key, names in candidates.items():
         loaded = None
@@ -381,7 +373,6 @@ def _draw_rounded_panel(
 
 def build_wrap_cover(
     title: str,
-    subtitle: str,
     author: str,
     back_blurb: str,
     out_path: Path,
@@ -405,9 +396,9 @@ def build_wrap_cover(
     Height (top to bottom): bleed | trim | bleed
 
     Front: the localized hero artwork whose text zone already contains the
-    exact title, subtitle, age badge and author rendered by the image model.
-    When the artwork does not carry the copy (title_in_artwork=False), the
-    copy is composed deterministically with a white stroke — no opaque boxes.
+    exact title, age badge and author rendered by the image model. When the
+    artwork does not carry the copy (title_in_artwork=False), the copy is
+    composed deterministically with a white stroke — no opaque boxes.
     Back: one shared model-generated background (no character, no text) with
     SIX interior-page thumbnails (3 rows x 2 columns, large and centered)
     filling the upper area; the bottom strip (1.5in) is left as artwork so
@@ -435,7 +426,6 @@ def build_wrap_cover(
 
     fonts = _load_fonts()
     title_font = fonts["title"]
-    subtitle_font = fonts["subtitle"]
 
     # Front: the localized hero artwork (title/copy embedded by the model).
     front_bg = hero_image_path or bg_image_path
@@ -473,24 +463,18 @@ def build_wrap_cover(
         panel_w = int(trim_w_px * 0.86)
         panel_top = bleed_px + int(_inches_to_pixels(0.35))
         panel_bottom = bleed_px + int(_inches_to_pixels(1.35))
-        # Fitted display fonts for the title and subtitle
+        # Fitted display font for the title
         font_dir = Path(__file__).resolve().parents[3] / "assets" / "fonts"
         title_font_path = font_dir / "Baloo2-Bold.ttf"
-        subtitle_font_path = font_dir / "Quicksand-Bold.ttf"
         try:
             title_font = _fit_font(draw, title, str(title_font_path), panel_w - 40, 150)
         except OSError:
             title_font = fonts["title"]
-        try:
-            subtitle_font = _fit_font(draw, subtitle, str(subtitle_font_path), panel_w - 60, 44) if subtitle else None
-        except OSError:
-            subtitle_font = fonts["subtitle"] if subtitle else None
-        # Layout inside the panel: title, subtitle, author (age badge below)
+        # Layout inside the panel: title, author (age badge below)
         title_h = title_font.size
-        subtitle_h = subtitle_font.size if subtitle_font else 0
         author_h = fonts["author"].size
         badge_h = fonts["body"].size if age_range else 0
-        total_h = title_h + subtitle_h + author_h + badge_h + 4 * int(_inches_to_pixels(0.1))
+        total_h = title_h + author_h + badge_h + 3 * int(_inches_to_pixels(0.1))
         y = panel_top + (panel_bottom - panel_top - total_h) // 2
         # Translucent rounded panel (soft banner look, artwork stays visible)
         _draw_rounded_panel(
@@ -504,14 +488,8 @@ def build_wrap_cover(
             draw, title, title_font, front_cx, y,
             fill=text_color, shadow_offset=5, stroke_width=4, stroke_fill=(255, 255, 255),
         )
-        if subtitle_font:
-            y += title_h // 2 + subtitle_h // 2 + int(_inches_to_pixels(0.05))
-            _draw_text_with_shadow(
-                draw, subtitle, subtitle_font, front_cx, y,
-                fill=(90, 70, 40), shadow_offset=3, stroke_width=2, stroke_fill=(255, 255, 255),
-            )
         if author:
-            y += subtitle_h // 2 + author_h // 2 + int(_inches_to_pixels(0.1))
+            y += title_h // 2 + author_h // 2 + int(_inches_to_pixels(0.1))
             _draw_text_with_shadow(
                 draw, author, fonts["author"], front_cx, y,
                 fill=text_color, shadow_offset=4, stroke_width=3, stroke_fill=(255, 255, 255),
@@ -593,7 +571,7 @@ def build_full_preview_pdf(cover_pdf: Path, interior_pdf: Path, out_path: Path) 
     return out_path
 
 
-def embed_cover_title(image_path: Path, title: str, subtitle: str = "") -> Path:
+def embed_cover_title(image_path: Path, title: str) -> Path:
     """Embed exact localized cover copy into the hero artwork deterministically."""
     image_path.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path) as source:
@@ -606,9 +584,7 @@ def embed_cover_title(image_path: Path, title: str, subtitle: str = "") -> Path:
     title_lines = _draw_wrapped_text(draw, title, title_font, max_width)
     line_height = title_font.size + 8
     title_height = line_height * len(title_lines)
-    subtitle_font = fonts["subtitle"]
-    subtitle_height = subtitle_font.size + 12 if subtitle else 0
-    block_height = title_height + subtitle_height + 44
+    block_height = title_height + 44
     top = max(24, canvas.height - block_height - 48)
     draw.rounded_rectangle(
         [cx - max_width // 2 - 24, top - 20, cx + max_width // 2 + 24, top + block_height],
@@ -617,14 +593,6 @@ def embed_cover_title(image_path: Path, title: str, subtitle: str = "") -> Path:
     )
     for index, (line, width) in enumerate(title_lines):
         draw.text((cx - width // 2, top + index * line_height), line, fill=(30, 30, 50), font=title_font)
-    if subtitle:
-        bbox = draw.textbbox((0, 0), subtitle, font=subtitle_font)
-        draw.text(
-            (cx - (bbox[2] - bbox[0]) // 2, top + title_height + 10),
-            subtitle,
-            fill=(30, 30, 50),
-            font=subtitle_font,
-        )
     canvas.save(image_path, "PNG", optimize=True)
     return image_path
 

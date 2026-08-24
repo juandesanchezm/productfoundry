@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from PIL import Image, ImageStat
 
 from productfoundry.packaging import ImageOps_contain, build_wrap_cover, localized_age_label
-from productfoundry.stages.story_helpers import localized_series_name, localized_story_subtitle
+from productfoundry.stages.story_helpers import localized_series_name
 
 
 def test_image_ops_contain_preserves_full_source_inside_target():
@@ -25,7 +25,6 @@ def test_wrap_cover_leaves_spine_blank(tmp_path):
 
     build_wrap_cover(
         title="A Title",
-        subtitle="A Subtitle",
         author="An Author",
         back_blurb="A short description.",
         out_path=output,
@@ -43,33 +42,16 @@ def test_wrap_cover_leaves_spine_blank(tmp_path):
         assert max(ImageStat.Stat(spine).extrema[0]) == 255
 
 
-def test_localized_copy_uses_story_language():
-    pack = SimpleNamespace(
-        stories={
-            "stories": [
-                {
-                    "id": "story",
-                    "subtitle_es": "Una aventura para colorear",
-                    "subtitle_en": "A coloring adventure",
-                }
-            ]
-        }
-    )
-
-    assert localized_story_subtitle(pack, "story", "es", "fallback") == "Una aventura para colorear"
-    assert localized_story_subtitle(pack, "story", "en", "fallback") == "A coloring adventure"
-
-
 def test_age_label_is_localized():
     assert localized_age_label("es", "3-8") == "Edad 3-8"
     assert localized_age_label("en", "3-8") == "Ages 3-8"
 
 
 def test_series_name_is_localized():
-    pack = SimpleNamespace(profile=SimpleNamespace(series_name={"es": "Las Aventuras de Cocholate", "en": "Cocholate's Adventures"}))
+    pack = SimpleNamespace(profile=SimpleNamespace(series_name={"es": "Las Aventuras de Cocholate", "en": "The Adventures of Cocholate"}))
 
     assert localized_series_name(pack, "es") == "Las Aventuras de Cocholate"
-    assert localized_series_name(pack, "en") == "Cocholate's Adventures"
+    assert localized_series_name(pack, "en") == "The Adventures of Cocholate"
 
 
 def test_series_name_falls_back_to_plain_string():
@@ -86,7 +68,6 @@ def test_wrap_cover_back_uses_background_image_when_provided(tmp_path):
 
     build_wrap_cover(
         title="A Title",
-        subtitle="",
         author="An Author",
         back_blurb="A short description.",
         out_path=output,
@@ -114,7 +95,6 @@ def test_wrap_cover_front_overlay_uses_translucent_panel_not_opaque_box(tmp_path
 
     build_wrap_cover(
         title="A Long Book Title",
-        subtitle="A Subtitle",
         author="An Author",
         back_blurb="",
         out_path=output,
@@ -156,7 +136,6 @@ def test_wrap_cover_back_renders_two_by_three_thumbnail_grid(tmp_path):
 
     build_wrap_cover(
         title="A Title",
-        subtitle="",
         author="An Author",
         back_blurb="",
         out_path=output,
@@ -195,7 +174,6 @@ def test_wrap_cover_back_has_no_blurb_text_or_barcode_box(tmp_path):
 
     build_wrap_cover(
         title="A Title",
-        subtitle="A Subtitle",
         author="An Author",
         back_blurb="This blurb must NOT be rendered: the back cover stays clean for KDP.",
         out_path=output,

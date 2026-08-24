@@ -17,7 +17,6 @@ _SYSTEM = "Eres un generador de planes de producto para packs digitales. Genera 
 class ConceptSchema(BaseModel):
     pages: list[dict] = []
     titles: dict[str, str] = {}
-    subtitle: str = ""
     description_hint: str = ""
 
 
@@ -155,7 +154,6 @@ Devuelve SOLO JSON:
     }}
   ],
   "titles": {{"en": "{title_en}", "es": "{title_es}"}},
-  "subtitle": "<subtítulo corto>",
   "description_hint": "<1 frase descriptiva>"
 }}
 
@@ -181,7 +179,6 @@ Devuelve SOLO JSON con esta estructura:
     {{"id": "page_001", "index": 1, "beat": "<beat if applicable>", "prompt": "<prompt detallado en inglés para generar imagen>", "title": "<título corto>"}}
   ],
   "titles": {{"en": "<título en inglés>", "es": "<título en español>"}},
-  "subtitle": "<subtítulo corto>",
   "description_hint": "<1 frase descriptiva>"
 }}
 
@@ -252,6 +249,5 @@ class ConceptStage(Stage):
             theme=ctx.request.theme,
             pages=pages,
             titles=result.titles,
-            subtitle=result.subtitle,
             description_hint=result.description_hint,
         )

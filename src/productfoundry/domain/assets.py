@@ -13,7 +13,7 @@ class AssetSpec(BaseModel):
     audit_notes: str = ""
     rewrite_suggestion: str = ""  # judge's single-sentence fix for regeneration
     expected_title: str = ""  # cover copy contract: exact expected text (hero)
-    expected_subtitle: str = ""  # cover copy contract: exact expected subtitle
+    expected_series: str = ""  # cover copy contract: localized series name
     expected_age_badge: str = ""  # cover copy contract: localized age label
     expected_author: str = ""  # cover copy contract: author name
     expected_back_blurb: str = ""  # cover copy contract: back-cover blurb

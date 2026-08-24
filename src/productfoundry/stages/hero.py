@@ -1,10 +1,10 @@
 """hero stage — generate the cover hero artwork.
 
 For every language in the request we generate (or refresh) a localized cover
-hero image with the exact title, subtitle, series, age badge and author
-embedded by the image model. The vision judge verifies the copy letter by
-letter (including accents) and the stage retries with corrections until the
-copy is exact or attempts are exhausted.
+hero image with the exact title, series, age badge and author embedded by the
+image model. The vision judge verifies the copy letter by letter (including
+accents) and the stage retries with corrections until the copy is exact or
+attempts are exhausted.
 """
 from __future__ import annotations
 
@@ -167,7 +167,7 @@ class HeroStage(Stage):
         age_badge = localized_age_label(language, getattr(ctx.pack.profile, "age_range", "") or "")
         return {
             "expected_title": concept.titles.get(language, concept.titles.get("en", ctx.request.theme)),
-            "expected_subtitle": localized_series_name(ctx.pack, language),
+            "expected_series": localized_series_name(ctx.pack, language),
             "expected_age_badge": age_badge,
             "expected_author": _get_author(ctx.pack),
         }
@@ -217,7 +217,7 @@ class HeroStage(Stage):
                 size=gen_size,
                 quality="high",
                 expected_title=expected["expected_title"],
-                expected_subtitle=expected["expected_subtitle"],
+                expected_series=expected["expected_series"],
                 expected_age_badge=expected["expected_age_badge"],
                 expected_author=expected["expected_author"],
             )

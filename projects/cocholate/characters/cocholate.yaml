@@ -2,18 +2,18 @@ id: cocholate
 role: main
 name_en: Cocholate
 name_es: Cocholate
-archetype_en: "cute kawaii baby dragon"
-archetype_es: "bebé dragón kawaii tierno"
+archetype_en: "cute kawaii baby dragon with two small rounded horns"
+archetype_es: "bebé dragón kawaii tierno con dos cuernos pequeños redondeados"
 description_en: >
-  Cocholate, a cute kawaii baby dragon with an oversized round head, big round
-  expressive eyes, chubby round body, tiny wings, short stubby legs, soft
-  belly, friendly smile, and a rounded tail tip. No horns, no spikes, no
-  claws.
+  Cocholate, a cute kawaii baby dragon with an oversized round head, two small
+  rounded horns on top, big round expressive eyes, chubby round body, very small
+  stubby wings on the back, short stubby legs, soft belly, friendly smile, and a
+  rounded tail tip. No spikes, no claws.
 description_es: >
-  Cocholate, un bebé dragón kawaii con cabeza redonda grande, ojos grandes y
-  redondos, cuerpo rechoncho y redondo, alitas pequeñas, patitas cortas,
-  barriguita suave, sonrisa amigable y punta de cola redondeada.
-  Sin cuernos, sin púas, sin garras.
-palette_en: "chocolate brown body, cream belly, soft pink wing membranes"
-palette_es: "cuerpo marrón chocolate, barriga crema, membranas de las alas rosas"
+  Cocholate, un bebé dragón kawaii con cabeza redonda grande, dos cuernos
+  pequeños redondeados arriba, ojos grandes y redondos, cuerpo rechoncho y
+  redondo, alitas muy pequeñas y regordetas en la espalda, patitas cortas,
+  barriguita suave, sonrisa amigable y punta de cola redondeada. Sin púas, sin garras.
+palette_en: "chocolate brown body, cream belly, soft pink wing membranes, cream horns"
+palette_es: "cuerpo marrón chocolate, barriga crema, membranas de las alas rosas, cuernos color crema"
 reference_image: cocholate.png

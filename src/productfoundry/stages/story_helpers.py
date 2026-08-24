@@ -2,19 +2,6 @@
 from __future__ import annotations
 
 
-def localized_story_subtitle(pack, story_id: str, language: str, fallback: str = "") -> str:
-    stories = (getattr(pack, "stories", None) or {}).get("stories", [])
-    for story in stories:
-        if not isinstance(story, dict) or story.get("id") != story_id:
-            continue
-        localized = story.get(f"subtitle_{language}")
-        if localized:
-            return str(localized)
-        if story.get("subtitle_en"):
-            return str(story["subtitle_en"])
-    return fallback
-
-
 def localized_series_name(pack, language: str, default: str = "") -> str:
     """Return the series name in the requested language.
 
