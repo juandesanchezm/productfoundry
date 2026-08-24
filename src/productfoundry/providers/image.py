@@ -91,19 +91,29 @@ class PlaceholderImageProvider(ImageProvider):
 
 
 class OpenAIImageProvider(ImageProvider):
-    def __init__(self, api_key: str, model: str = "gpt-image-2") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-image-2",
+        timeout: float = 120.0,
+        max_retries: int = 1,
+    ) -> None:
         self.api_key = api_key
         self.model = model
+        self.timeout = timeout
+        self.max_retries = max_retries
+
+    def _client(self):
+        from openai import OpenAI
+
+        return OpenAI(api_key=self.api_key, timeout=self.timeout, max_retries=self.max_retries)
 
     def generate(self, request: ImageGenerationRequest) -> bytes:
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY is not set")
         size = _validate_size(request.size)
-        from openai import OpenAI
+        client = self._client()
 
-        client = OpenAI(api_key=self.api_key)
-
-        # Build common kwargs
         common = {
             "model": self.model,
             "prompt": request.prompt,
@@ -113,21 +123,19 @@ class OpenAIImageProvider(ImageProvider):
         if request.output_format:
             common["output_format"] = request.output_format
 
-        # Use images.edit when references are provided (character consistency),
-        # images.generate otherwise.
         refs = request.reference_images or ([request.reference_image] if request.reference_image else [])
-        if refs:
-            images = []
-            for i, ref_bytes in enumerate(refs):
-                buf = io.BytesIO(ref_bytes)
-                buf.name = f"reference_{i}.png"
-                images.append(buf)
-            resp = client.images.edit(
-                image=images,
-                **common,
-            )
-        else:
-            resp = client.images.generate(**common)
+        try:
+            if refs:
+                images = []
+                for i, ref_bytes in enumerate(refs):
+                    buf = io.BytesIO(ref_bytes)
+                    buf.name = f"reference_{i}.png"
+                    images.append(buf)
+                resp = client.images.edit(image=images, **common)
+            else:
+                resp = client.images.generate(**common)
+        except Exception as exc:
+            raise RuntimeError(f"openai image call failed: {exc}") from exc
 
         if not resp.data:
             raise RuntimeError("provider returned no image data")
@@ -136,8 +144,12 @@ class OpenAIImageProvider(ImageProvider):
             raise RuntimeError("provider returned empty b64_json")
         raw = base64.b64decode(b64)
         data = _validate_image_bytes(raw)
-        # GPT Image models bill by token usage (image input + text + image
-        # output). Surface the usage so the engine can track real cost instead
-        # of a static price table approximation.
-        request.usage = (resp.usage or {}).model_dump() if hasattr(resp.usage, "model_dump") else (resp.usage or {})
+        usage = {}
+        if resp.usage is not None:
+            usage = (
+                resp.usage.model_dump()
+                if hasattr(resp.usage, "model_dump")
+                else dict(resp.usage)
+            )
+        request.usage = usage
         return data

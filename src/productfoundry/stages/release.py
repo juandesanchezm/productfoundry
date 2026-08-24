@@ -19,6 +19,7 @@ from productfoundry.domain.listing import ListingSet
 from productfoundry.domain.manifest import PublicationManifest, validate_compliance
 from productfoundry.domain.packaging import PackagePlan
 from productfoundry.domain.product import ProductPlan
+from productfoundry.engine.hashing import sha256_text
 from productfoundry.engine.pipeline import Stage, StageContext
 
 PROMPT_VERSION = "release-v2"
@@ -30,6 +31,7 @@ class ReleaseReport(BaseModel):
     verdict: str = "fail"  # pass | fail
     publishable: bool = False
     human_release_approved: bool = False
+    deliverables_fingerprint: str = ""
     manifest: PublicationManifest | None = None
 
 
@@ -44,6 +46,7 @@ class ReleaseStage(Stage):
         "listings": ListingSet,
     }
     prompt_version = PROMPT_VERSION
+    gate_verdict = "pass"
 
     def extra_hash_inputs(self, ctx: StageContext) -> list[str]:
         # The human approval marker is an input: approving/revoking must
@@ -54,12 +57,21 @@ class ReleaseStage(Stage):
         # Include the hash of all existing gate artifacts so a change in any
         # upstream gate result invalidates the release node.
         gate_hashes = []
-        for gate_name in ("review", "printcheck", "audit_assets", "lineart_check"):
+        for gate_name in ("review", "printcheck", "audit_assets", "lineart_check", "audit_prompt", "audit_character_sheet"):
             env = ctx.get_artifact(gate_name)
             if env is not None:
                 import json
                 gate_hashes.append(json.dumps(env.artifact, sort_keys=True))
-        return [marker_content, "|".join(gate_hashes)]
+        # Also include the bytes fingerprint of every deliverable so the cache
+        # cannot accept stale files.
+        deliverable_hashes = []
+        for root in (ctx.packages_dir, ctx.listings_dir):
+            if not root.exists():
+                continue
+            for p in sorted(root.rglob("*")):
+                if p.is_file():
+                    deliverable_hashes.append(sha256_text(p.read_bytes() if p.stat().st_size < 2_000_000 else p.name))
+        return [marker_content, "|".join(gate_hashes), "|".join(deliverable_hashes)]
 
     def expected_output_files(self, ctx: StageContext) -> list[Path] | None:
         return [ctx.project_dir / "publication-manifest.json"]
@@ -86,10 +98,16 @@ class ReleaseStage(Stage):
             verdict = (env.artifact.get("verdict") if env else None) or "fail"
             manifest.add_gate(name, verdict)
 
-        _gate("review")
-        _gate("printcheck")
-        _gate("audit_assets")
-        _gate("lineart_check")
+        for gate_name in (
+            "audit_prompt",
+            "pack_validate",
+            "audit_character_sheet",
+            "audit_assets",
+            "lineart_check",
+            "printcheck",
+            "review",
+        ):
+            _gate(gate_name)
 
         compliance_errors = validate_compliance(
             ctx.pack.profile.author,
@@ -110,16 +128,44 @@ class ReleaseStage(Stage):
             or ctx.runtime.llm.provider == "placeholder"
         )
 
-        # Human approval: a marker file written by `productfoundry release --approve`.
-        human_approved = (ctx.project_dir / APPROVAL_MARKER).exists()
+        # Fingerprint of all deliverables; bound to the approval marker so any
+        # change in bytes invalidates prior human approval.
+        deliverable_hashes: list[str] = []
+        for file in manifest.files:
+            deliverable_hashes.append(f"{file.path}:{file.sha256}")
+        fingerprint = sha256_text("\n".join(sorted(deliverable_hashes)))
+        marker = ctx.project_dir / APPROVAL_MARKER
+        marker_content = marker.read_text().strip() if marker.exists() else ""
+        # Marker format: "<fingerprint>\napproved" — the fingerprint part binds
+        # the approval to the current deliverables.
+        marker_fingerprint = ""
+        marker_approved = False
+        for line in marker_content.splitlines():
+            if line.startswith("fingerprint:"):
+                marker_fingerprint = line.split(":", 1)[1].strip()
+            elif line == "approved":
+                marker_approved = True
+        human_approved = marker_approved and marker_fingerprint == fingerprint
+        if marker.exists() and not human_approved:
+            marker.unlink()
         manifest.human_release_approved = human_approved
+        manifest.deliverables_fingerprint = fingerprint  # type: ignore[attr-defined]
 
         publishable = manifest.compute_publishable()
         manifest.save(ctx.project_dir)
+
+        if publishable and marker.exists() and human_approved:
+            # Persist the binding to the deliverables fingerprint so future
+            # content changes invalidate the approval.
+            marker.write_text(
+                f"fingerprint:{fingerprint}\napproved\n",
+                encoding="utf-8",
+            )
 
         return ReleaseReport(
             verdict="pass" if publishable else "fail",
             publishable=publishable,
             human_release_approved=human_approved,
+            deliverables_fingerprint=fingerprint,
             manifest=manifest,
         )

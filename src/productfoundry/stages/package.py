@@ -145,8 +145,9 @@ def build_packages(
                 )
 
                 # Wrap cover (front + spine + back) with KDP-compliant dimensions.
-                # The single English hero artwork (copy embedded by the image
-                # model) is shared by every language output.
+                # One localized hero artwork per language, copy embedded by the
+                # image model. Languages without their own hero fall back to
+                # the English cover so the package still builds.
                 wrap_path = (
                     packages_dir / "print" / lang
                     / f"{plan.pack_id}-{request_theme}-{marketplace}-cover.png"
@@ -154,9 +155,13 @@ def build_packages(
                 title = plan.titles.get(lang, plan.titles.get("en", request_theme))
                 subtitle = localized_story_subtitle(pack, request_story_id, lang, plan.subtitle)
                 blurb = _get_description_blurb(pack, plan, lang, story)
-                hero_img = assets_dir / "cover_hero.png"
+                hero_img = assets_dir / f"cover_hero_{lang}.png"
                 if not hero_img.exists():
-                    hero_img = assets_dir / "cover_hero_en.png" if (assets_dir / "cover_hero_en.png").exists() else (image_paths[0] if image_paths else None)
+                    hero_img = assets_dir / "cover_hero_en.png"
+                if not hero_img.exists():
+                    hero_img = assets_dir / "cover_hero.png"
+                if not hero_img.exists():
+                    hero_img = image_paths[0] if image_paths else None
                 # Interior-page thumbnails for the back cover (bestseller convention)
                 thumbnails = [image_paths[i] for i in range(6) if i < len(image_paths)]
                 age_range = getattr(pack.profile, "age_range", "") or ""
@@ -299,10 +304,9 @@ class PackageStage(Stage):
 
     def output_files(self, ctx: StageContext) -> list[Path]:
         files: list[Path] = []
-        for p in (ctx.packages_dir / "digital").rglob("*"):
-            if p.is_file():
-                files.append(p)
-        for p in (ctx.packages_dir / "print").rglob("*"):
+        if not ctx.packages_dir.exists():
+            return files
+        for p in ctx.packages_dir.rglob("*"):
             if p.is_file():
                 files.append(p)
         return sorted(files)

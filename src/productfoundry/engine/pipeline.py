@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import os
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -204,6 +206,28 @@ class PipelineExecutor:
         runtime_path: str = "",
     ) -> ProductState:
         project_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = project_dir / ".pipeline.lock"
+        if lock_path.exists():
+            existing_pid = lock_path.read_text().strip()
+            raise RuntimeError(
+                f"another pipeline run is using this edition ({existing_pid}); remove {lock_path} if it is stale"
+            )
+        lock_path.write_text(f"pid:{os.getpid()} started:{datetime.now(UTC).isoformat()}")
+        try:
+            return self._execute_locked(project_dir, runtime, pack, request, product_id, runtime_path)
+        finally:
+            if lock_path.exists():
+                lock_path.unlink()
+
+    def _execute_locked(
+        self,
+        project_dir: Path,
+        runtime: RuntimeProfile,
+        pack: Pack,
+        request: ProductRequest,
+        product_id: str,
+        runtime_path: str,
+    ) -> ProductState:
         state_path = project_dir / "product.json"
         if state_path.exists():
             state = ProductState.load(project_dir)
@@ -255,10 +279,12 @@ class PipelineExecutor:
                     name: getattr(pack, name)
                     for name in (
                         "style", "themes", "packaging", "listing", "quality", "audit", "stories", "compliance",
-                )
+                    )
                 },
                 "runtime": runtime.model_dump(),
                 "request": request.model_dump(),
+                "synthetic": ctx.runtime.image.provider == "placeholder"
+                or ctx.runtime.llm.provider == "placeholder",
             }
         )
         dirty = False
@@ -278,7 +304,7 @@ class PipelineExecutor:
                 node.error = str(e)
                 node.updated_at = datetime.now(UTC).isoformat()
                 state.nodes[stage_name] = node
-                state.save(project_dir)
+                _save_state(state, project_dir)
                 raise
 
             node_hash = output_key(
@@ -303,7 +329,7 @@ class PipelineExecutor:
                 )
                 expected = stage.expected_output_files(ctx)
                 check_files = expected if expected is not None else stage.output_files(ctx)
-                files_ok = all(p.exists() and p.stat().st_size > 0 for p in check_files)
+                files_ok = all(_file_is_current(p) for p in check_files)
                 if artifacts_ok and files_ok:
                     # Revalidate gate on cache-hit: a tampered artifact that no
                     # longer carries the expected verdict must not be trusted.
@@ -344,7 +370,7 @@ class PipelineExecutor:
             state.nodes[stage_name] = node
             # Persist the running marker before provider calls so resume can
             # deterministically continue from this stage after interruption.
-            state.save(project_dir)
+            _save_state(state, project_dir)
 
             try:
                 before = ctx.cost_total()
@@ -355,7 +381,7 @@ class PipelineExecutor:
                 node.error = repr(e)
                 node.updated_at = datetime.now(UTC).isoformat()
                 state.nodes[stage_name] = node
-                state.save(project_dir)
+                _save_state(state, project_dir)
                 raise
 
             if ctx.cost_total() > runtime.budget.max_cost:
@@ -366,7 +392,7 @@ class PipelineExecutor:
                 )
                 node.updated_at = datetime.now(UTC).isoformat()
                 state.nodes[stage_name] = node
-                state.save(project_dir)
+                _save_state(state, project_dir)
                 raise RuntimeError(node.error)
 
             node.status = "done"
@@ -389,7 +415,7 @@ class PipelineExecutor:
                 )
                 output_path = ctx.artifacts_dir / f"{output_name}.json"
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(envelope.model_dump_json(indent=2))
+                _atomic_write_text(output_path, envelope.model_dump_json(indent=2))
                 ctx.artifacts[output_name] = envelope
                 node.output_path = str(output_path.relative_to(project_dir))
             dirty = True
@@ -412,19 +438,21 @@ class PipelineExecutor:
                     node.error = "gate failed: " + "; ".join(gate_failures)
                     node.updated_at = datetime.now(UTC).isoformat()
                     state.nodes[stage_name] = node
-                    state.save(project_dir)
+                    _save_state(state, project_dir)
                     raise RuntimeError(node.error)
 
         if dirty:
-            state.save(project_dir)
+            _save_state(state, project_dir)
         return state
 
 
 def start_from_stage(state, stage_name: str) -> None:
-    """Invalidate a stage and everything after it (keeps earlier nodes done).
+    """Invalidate a stage and every downstream node. Keeps earlier nodes done.
 
     Used by `resume --start-at` to regenerate a suffix of the pipeline
     (e.g. hero + back_cover + package) without touching earlier nodes.
+    The next executor run rebuilds the affected artifact JSONs and the
+    physical files the stages declare.
     """
     names = list(PIPELINE_ORDER)
     if stage_name not in names:
@@ -436,6 +464,22 @@ def start_from_stage(state, stage_name: str) -> None:
             continue
         node.status = "pending"
         node.input_hash = ""
+
+
+def _save_state(state: ProductState, project_dir: Path) -> None:
+    _atomic_write_text(project_dir / "product.json", json.dumps(state.model_dump(), indent=2))
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=str(path.parent), prefix=f".{path.name}.", encoding="utf-8") as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
+
+
+def _file_is_current(path: Path) -> bool:
+    return path.exists() and path.stat().st_size > 0
 
 
 def _load_inputs(ctx: StageContext, stage: Stage) -> tuple[dict[str, BaseModel], list[str]]:

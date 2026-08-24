@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from productfoundry.domain.assets import AssetPlan, AssetSpec
+from productfoundry.engine.cost_tracking import estimate_image_cost
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.providers import ImageGenerationRequest
-from productfoundry.providers.pricing import image_cost_usd
 from productfoundry.series import canonical_character_reference
 
 PROMPT_VERSION = "character-sheet-v3"
@@ -136,22 +136,20 @@ class CharacterSheetStage(Stage):
                     raise RuntimeError(f"canonical character reference is missing: {canonical}")
             elif not out_path.exists():
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(
-                    ctx.image_provider.generate(
-                        ImageGenerationRequest(
-                            prompt=prompt,
-                            aspect_ratio="1:1",
-                            size=gen_size,
-                            quality=quality,
-                        )
-                    )
+                image_request = ImageGenerationRequest(
+                    prompt=prompt,
+                    aspect_ratio="1:1",
+                    size=gen_size,
+                    quality=quality,
                 )
+                out_path.write_bytes(ctx.image_provider.generate(image_request))
                 ctx.set_cost(
-                    image_cost_usd(
+                    estimate_image_cost(
                         ctx.runtime.image.provider,
                         ctx.runtime.image.model,
                         gen_size,
                         quality,
+                        getattr(image_request, "usage", None) or {},
                     )
                 )
             spec = AssetSpec(

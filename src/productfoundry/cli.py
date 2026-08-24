@@ -356,6 +356,7 @@ def resume(
             from productfoundry.engine.pipeline import start_from_stage
 
             start_from_stage(state, start_at)
+            state.save(project_dir)
         state = _run_product(
             project_dir,
             request.pack,
@@ -435,8 +436,9 @@ def release(
         typer.echo(f"error: product {product_id!r} not found", err=True)
         raise typer.Exit(1)
     if approve:
-        (project_dir / APPROVAL_MARKER).write_text("approved")
-        typer.echo("human approval recorded; re-running release gate")
+        # The release stage recomputes the deliverables fingerprint and writes
+        # the canonical approval marker; we only request it here.
+        typer.echo("approval request recorded; re-running release gate")
     else:
         marker = project_dir / APPROVAL_MARKER
         if marker.exists():

@@ -227,15 +227,49 @@ def resolve_book(
         raise CatalogError(f"franchise {franchise.id!r} has no main character")
 
     series_config = copy.deepcopy(series.config)
-    nested = series_config.setdefault("series", series_config)
-    if not isinstance(nested, dict):
-        raise CatalogError(f"series {series_id!r}: expected a mapping")
+    raw_series = series_config.get("series") if isinstance(series_config, dict) else None
+    if not isinstance(raw_series, dict):
+        raise CatalogError(f"series {series_id!r}: expected a mapping under 'series'")
+    nested = raw_series
+    declared_contracts = nested.get("characters") or {}
+    if isinstance(declared_contracts, list):
+        declared_contracts = {
+            entry.get("id"): entry for entry in declared_contracts if isinstance(entry, dict) and entry.get("id")
+        }
+    if not isinstance(declared_contracts, dict):
+        raise CatalogError(f"series {series_id!r}: characters must be a mapping")
+    declared_ids = {cid for cid in declared_contracts if isinstance(cid, str)}
+    franchise_ids = set(franchise.characters)
+    extra_in_franchise = franchise_ids - declared_ids
+    missing_in_franchise = declared_ids - franchise_ids
+    if extra_in_franchise:
+        raise CatalogError(
+            f"series {series_id!r} declares fewer characters than franchise: "
+            f"missing {sorted(extra_in_franchise)}"
+        )
+    if missing_in_franchise:
+        raise CatalogError(
+            f"series {series_id!r} declares characters not present in franchise: "
+            f"{sorted(missing_in_franchise)}"
+        )
     contracts: dict[str, dict] = {}
     palettes: dict[str, dict] = {}
     for char_id, character in franchise.characters.items():
+        contract = declared_contracts.get(char_id) or {}
+        expected_hash = contract.get("definition_hash")
+        if not expected_hash:
+            raise CatalogError(
+                f"series {series_id!r}: character {char_id!r} is missing its locked definition hash"
+            )
+        if expected_hash != character_definition_hash(character.data):
+            raise CatalogError(
+                f"series {series_id!r}: character {char_id!r} definition hash changed "
+                "(bump series.version to register a new design)"
+            )
+        reference_image = contract.get("reference_image") or f"{char_id}.png"
         contracts[char_id] = {
-            "reference_image": f"{char_id}.png",
-            "definition_hash": character_definition_hash(character.data),
+            "reference_image": reference_image,
+            "definition_hash": expected_hash,
         }
         palettes[char_id] = {
             lang: (character.data.get(f"palette_{lang}") or "")

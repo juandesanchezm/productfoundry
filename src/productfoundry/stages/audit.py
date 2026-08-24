@@ -17,7 +17,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from productfoundry.domain.assets import AssetPlan
 from productfoundry.domain.audit import (
@@ -321,42 +321,50 @@ def _audit_prompts(ctx: StageContext, plan: ProductPlan) -> PromptAuditReport:
     )
     resp = ctx.llm.complete(PROMPT_SYSTEM, user)
     ctx.set_cost(estimate_cost(resp))
+    data: dict[str, Any] = {}
     try:
         data = _parse_judge_json(resp.content)
-        verdicts = [
-            AuditVerdict(
-                status=_coerce_status(v.get("status", "fail")),
-                notes=v.get("notes", ""),
-                rewrite_suggestion=v.get("rewrite_suggestion", ""),
+        if not isinstance(data, dict):
+            data = {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        data = {}
+
+    verdicts: list[AuditVerdict] = []
+    raw_verdicts = data.get("verdicts") if data else None
+    if isinstance(raw_verdicts, list):
+        for v in raw_verdicts:
+            if not isinstance(v, dict):
+                continue
+            verdicts.append(
+                AuditVerdict(
+                    status=_coerce_status(v.get("status", "fail")),
+                    notes=v.get("notes", ""),
+                    rewrite_suggestion=v.get("rewrite_suggestion", ""),
+                )
             )
-            for v in data.get("verdicts", [])
-        ]
-    except (json.JSONDecodeError, TypeError, ValueError, AttributeError, KeyError):
-        # Parse failure → fail-closed: a judge that cannot answer must not
-        # approve anything.
+    if not verdicts:
         verdicts = [AuditVerdict(status="fail", notes="judge parse failure") for _ in plan.pages]
 
-    # Fail-closed: a partial response (fewer verdicts than pages) must not
-    # pass. Pad missing verdicts with fail so every page is accounted for.
     while len(verdicts) < len(plan.pages):
         verdicts.append(AuditVerdict(status="fail", notes="missing verdict for this page"))
-    # Truncate extra verdicts (should not happen, but be safe)
     verdicts = verdicts[: len(plan.pages)]
 
-    # In-place mutate the plan: status, notes, and optionally rewrite prompt
     for i, v in enumerate(verdicts):
         if i >= len(plan.pages):
             break
         plan.pages[i].audit_status = v.status
         plan.pages[i].audit_notes = v.notes
-    # Apply rewrite suggestions when present (cheaper than re-asking)
-    try:
-        rewrites = [v.get("rewrite_suggestion", "") for v in data.get("verdicts", [])]
-        for i, rw in enumerate(rewrites):
-            if i < len(plan.pages) and rw:
-                plan.pages[i].prompt = f"{plan.pages[i].prompt}. Correction: {rw}"
-    except (TypeError, AttributeError, KeyError, ValueError):
-        pass
+
+    rewrites = []
+    if isinstance(raw_verdicts, list):
+        for v in raw_verdicts:
+            if isinstance(v, dict):
+                rewrites.append(v.get("rewrite_suggestion", ""))
+            else:
+                rewrites.append("")
+    for i, rw in enumerate(rewrites):
+        if i < len(plan.pages) and rw:
+            plan.pages[i].prompt = f"{plan.pages[i].prompt}. Correction: {rw}"
 
     return PromptAuditReport(verdicts=verdicts, vision_model=_judge_model(ctx.pack))
 
@@ -374,7 +382,7 @@ def _audit_single_image(
         if character
         else ""
     )
-    audience = getattr(ctx.pack.profile, "audience", "") or "children"
+    audience = getattr(ctx.pack.profile, "audience", "") or getattr(ctx.pack.profile, "pack_type", "") or "the configured audience"
     if not path.exists():
         return AuditVerdict(status="fail", notes="asset file missing")
     img_bytes = path.read_bytes()
@@ -428,7 +436,7 @@ def _audit_images(ctx: StageContext, assets: AssetPlan) -> AssetAuditReport:
         if character
         else ""
     )
-    audience = getattr(ctx.pack.profile, "audience", "") or "children"
+    audience = getattr(ctx.pack.profile, "audience", "") or getattr(ctx.pack.profile, "pack_type", "") or "the configured audience"
     for i, asset in enumerate(assets.assets):
         path = ctx.assets_dir / f"{asset.id}.png"
         if not path.exists():

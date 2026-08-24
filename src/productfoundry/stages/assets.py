@@ -16,14 +16,14 @@ entire roster, reducing input token cost and improving adherence.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from productfoundry.domain.assets import AssetPlan, AssetSpec
 from productfoundry.domain.bible import build_character_bible
 from productfoundry.domain.product import ProductPlan
+from productfoundry.engine.cost_tracking import estimate_image_cost
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.providers import ImageGenerationRequest
-from productfoundry.providers.pricing import image_cost_usd
 from productfoundry.stages.audit import _audit_single_image, _is_audit_enabled
 
 PROMPT_VERSION = "assets-v4"
@@ -90,15 +90,46 @@ def plan_assets(plan: ProductPlan, image_size: str, pack=None, quality: str = "h
 
 
 def _load_page_references(ctx: StageContext, page) -> list[bytes]:
-    """Load character sheet images for only the characters present on this page."""
+    """Load character sheet images for only the characters present on this page.
+
+    Franchise catalogs use canonical PNGs that live outside the edition; those
+    are read directly. Legacy packs without canonical characters keep their
+    edition-local generated sheets. Reference bytes are cached at the stage
+    level so repeated lookups don't re-read disk.
+    """
     if page is None:
         raise RuntimeError("cannot generate a page without a page specification")
     refs: list[bytes] = []
+    cache = getattr(ctx, "_character_ref_cache", None)
+    if cache is None:
+        cache = {}
+        ctx._character_ref_cache = cache
+    from productfoundry.series import canonical_character_reference
+
+    pack_has_canonical = bool(getattr(ctx.pack, "character_root", None))
+
     for char_id in (page.characters or []):
+        if char_id in cache:
+            refs.append(cache[char_id])
+            continue
         sheet = ctx.assets_dir / f"character_sheet_{char_id}.png"
-        if not sheet.exists() or sheet.stat().st_size == 0:
-            raise RuntimeError(f"character sheet missing for {char_id!r}: {sheet}")
-        refs.append(sheet.read_bytes())
+        if sheet.exists() and sheet.stat().st_size > 0:
+            data = sheet.read_bytes()
+            cache[char_id] = data
+            refs.append(data)
+            continue
+        if pack_has_canonical:
+            try:
+                reference = canonical_character_reference(ctx.pack, char_id)
+            except ValueError as exc:
+                raise RuntimeError(f"character sheet missing for {char_id!r}: {exc}")
+            if not reference.exists() or reference.stat().st_size == 0:
+                raise RuntimeError(f"character sheet missing for {char_id!r}: {reference}")
+            data = reference.read_bytes()
+            cache[char_id] = data
+            refs.append(data)
+            continue
+        raise RuntimeError(f"character sheet missing for {char_id!r}: {sheet}")
     return refs
 
 
@@ -108,21 +139,26 @@ def _generate_one(
     assets_dir: Path,
     on_cost: callable | None = None,
     reference_images: list[bytes] | None = None,
+    usage_holder: dict[str, dict[str, Any]] | None = None,
 ) -> Path:
     path = assets_dir / f"{asset.id}.png"
-    path.write_bytes(
-        image_provider.generate(
-            ImageGenerationRequest(
-                prompt=asset.prompt,
-                aspect_ratio=asset.aspect_ratio,
-                size=asset.size,
-                quality=asset.quality,
-                reference_images=reference_images,
-            )
-        )
+    request = ImageGenerationRequest(
+        prompt=asset.prompt,
+        aspect_ratio=asset.aspect_ratio,
+        size=asset.size,
+        quality=asset.quality,
+        reference_images=reference_images,
     )
+    try:
+        path.write_bytes(image_provider.generate(request))
+    except Exception:
+        if on_cost is not None and getattr(request, "usage", None):
+            on_cost(asset.size, asset.quality, request.usage)
+        raise
+    if usage_holder is not None:
+        usage_holder[asset.id] = getattr(request, "usage", None) or {}
     if on_cost is not None:
-        on_cost(asset.size, asset.quality)
+        on_cost(asset.size, asset.quality, getattr(request, "usage", None) or {})
     return path
 
 
@@ -181,19 +217,23 @@ class AssetsStage(Stage):
         marker.write_text(design_hash)
 
         audit_enabled = _is_audit_enabled(ctx.pack)
+        provider = ctx.runtime.image.provider
+        model = ctx.runtime.image.model
         for a in plan.assets:
             page = next((p for p in concept.pages if p.id == a.id), None)
             refs = _load_page_references(ctx, page) if page else []
             path = ctx.assets_dir / f"{a.id}.png"
             attempt = 0
             max_attempts = len(quality_attempts) if quality_attempts else 3
+
+            def _on_cost(size: str, quality: str, usage: dict[str, Any], _provider=provider, _model=model) -> None:
+                ctx.set_cost(estimate_image_cost(_provider, _model, size, quality, usage))
+
             if not path.exists():
                 a.quality = quality_attempts[0] if quality_attempts else "low"
                 _generate_one(
                     a, ctx.image_provider, ctx.assets_dir,
-                    on_cost=lambda size, quality: ctx.set_cost(
-                        image_cost_usd(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality)
-                    ),
+                    on_cost=_on_cost,
                     reference_images=refs,
                 )
             if not audit_enabled:
@@ -210,9 +250,7 @@ class AssetsStage(Stage):
                 path.unlink()
                 _generate_one(
                     a, ctx.image_provider, ctx.assets_dir,
-                    on_cost=lambda size, quality: ctx.set_cost(
-                        image_cost_usd(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality)
-                    ),
+                    on_cost=_on_cost,
                     reference_images=refs,
                 )
                 verdict = _audit_single_image(ctx, a, path, page=page)

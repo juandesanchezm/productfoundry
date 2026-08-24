@@ -29,6 +29,7 @@ class PackProfile(BaseModel):
     audience: str = ""  # freeform description of the target audience
     age_range: str = ""  # e.g. "3-8" — shown as "Ages 3-8" badge on the cover
     series_name: str | dict[str, str] = ""  # franchise branding: plain string or {lang: name} mapping
+    theme: str = ""  # freeform niche hint used by agnostic stages (e.g. "back-cover scene")
 
 
 def derive_generation_size(page_size: str, base_px: int = 1024) -> str:

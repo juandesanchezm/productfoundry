@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from productfoundry.domain.assets import AssetPlan, AssetSpec
+from productfoundry.engine.cost_tracking import estimate_image_cost
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.providers import ImageGenerationRequest
-from productfoundry.providers.pricing import image_cost_usd
 from productfoundry.stages.audit import _audit_single_image, _is_audit_enabled
 from productfoundry.stages.hero import _get_author
 
@@ -24,6 +24,12 @@ def build_back_cover_prompt(pack) -> str:
     style = pack.style.get("style", {}) if hasattr(pack, "style") else {}
     positive = (style.get("positive_prompt_suffix") or "").strip()
     negative = (style.get("negative_prompt_suffix") or "").strip()
+    scene_hint = ""
+    if hasattr(pack, "themes") and isinstance(pack.themes, dict):
+        scene_hint = (pack.themes.get("back_cover_scene") or "").strip()
+    if not scene_hint:
+        theme = (getattr(pack, "profile", None).theme if hasattr(pack, "profile") else "") or ""
+        scene_hint = f"{theme} scenery background".strip()
 
     parts = []
     if positive:
@@ -31,9 +37,8 @@ def build_back_cover_prompt(pack) -> str:
     else:
         parts.append("vibrant illustration")
     parts.append(
-        "Dreamy enchanted forest scene as a book back-cover background. "
-        "No characters, no animals, no figures of any kind: only scenery — "
-        "softly blurred trees, flowers, mushrooms, leaves, gentle light. "
+        f"{scene_hint} background illustration for a book back cover. "
+        "No characters, no animals, no figures of any kind: only scenery. "
         "The upper area is calm and clean to host interior-page thumbnails, "
         "the lower area is quiet and mostly empty. No text, no letters, no "
         "sign, no banner, no watermark, no signature anywhere in the image."
@@ -61,19 +66,16 @@ def generate_back_cover(
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not out_path.exists():
-        out_path.write_bytes(
-            image_provider.generate(
-                ImageGenerationRequest(
-                    prompt=prompt,
-                    aspect_ratio="1:1",
-                    size=image_size,
-                    quality="high",
-                    reference_images=reference_images,
-                )
-            )
+        request = ImageGenerationRequest(
+            prompt=prompt,
+            aspect_ratio="1:1",
+            size=image_size,
+            quality="high",
+            reference_images=reference_images,
         )
+        out_path.write_bytes(image_provider.generate(request))
         if on_cost is not None:
-            on_cost(image_size, "high")
+            on_cost(image_size, "high", getattr(request, "usage", None) or {})
     return out_path
 
 
@@ -103,8 +105,8 @@ class BackCoverStage(Stage):
         if not back_path.exists():
             generate_back_cover(
                 prompt, ctx.image_provider, gen_size, back_path,
-                on_cost=lambda size, quality: ctx.set_cost(
-                    image_cost_usd(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality)
+                on_cost=lambda size, quality, usage: ctx.set_cost(
+                    estimate_image_cost(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality, usage)
                 ),
             )
         spec = AssetSpec(
@@ -125,8 +127,8 @@ class BackCoverStage(Stage):
             back_path.unlink()
             generate_back_cover(
                 spec.prompt, ctx.image_provider, gen_size, back_path,
-                on_cost=lambda s, q: ctx.set_cost(
-                    image_cost_usd(ctx.runtime.image.provider, ctx.runtime.image.model, s, q)
+                on_cost=lambda s, q, usage: ctx.set_cost(
+                    estimate_image_cost(ctx.runtime.image.provider, ctx.runtime.image.model, s, q, usage)
                 ),
             )
             verdict = _audit_single_image(ctx, spec, back_path, back_mode=True)

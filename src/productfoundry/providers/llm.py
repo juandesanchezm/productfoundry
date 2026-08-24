@@ -131,15 +131,38 @@ class PlaceholderLLMClient:
                 ]
             }
         elif "listing" in self.schema_hint or "listings" in user.lower():
-            payload = {
-                "listings": [
+            # Determine every (marketplace, format, language) combination the
+            # engine expects so the placeholder covers them all.
+            combos: list[dict[str, str]] = []
+            for line in user.splitlines():
+                line = line.strip()
+                if not line.startswith("- "):
+                    continue
+                parts = [p.strip() for p in line[2:].split("/")]
+                if len(parts) != 3:
+                    continue
+                marketplace, fmt, lang = parts
+                title_lang = "EN" if lang.lower() == "en" else lang.upper()
+                payload_entry = {
+                    "marketplace": marketplace,
+                    "language": lang,
+                    "format": fmt,
+                    "title": f"Placeholder {fmt.title()} {title_lang}",
+                    "description": "Placeholder description.",
+                    "tags": ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"],
+                    "price": 4.99,
+                    "category": "placeholder",
+                }
+                combos.append(payload_entry)
+            if not combos:
+                combos = [
                     {
                         "marketplace": "digital-a",
                         "language": "en",
                         "format": "digital",
                         "title": "Placeholder Digital EN",
                         "description": "Placeholder description.",
-                        "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"],
+                        "tags": ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"],
                         "price": 4.99,
                         "category": "placeholder",
                     },
@@ -154,7 +177,7 @@ class PlaceholderLLMClient:
                         "category": "placeholder",
                     },
                 ]
-            }
+            payload = {"listings": combos}
         else:
             import re
 

@@ -479,7 +479,7 @@ def test_hero_prompt_requires_the_exact_english_title_and_official_colors():
     assert "chocolate brown" in prompt
 
 
-def test_hero_stage_has_one_shared_artwork_for_all_languages():
+def test_hero_stage_generates_one_localized_cover_per_language():
     from productfoundry.stages.hero import HeroStage
 
     class FakeRequest:
@@ -490,7 +490,8 @@ def test_hero_stage_has_one_shared_artwork_for_all_languages():
         request = FakeRequest()
 
     assert HeroStage().output_files(FakeContext()) == [
-        Path("assets/cover_hero.png"),
+        Path("assets/cover_hero_en.png"),
+        Path("assets/cover_hero_es.png"),
     ]
 
 
@@ -504,22 +505,24 @@ def test_reference_routing_only_includes_page_characters(tmp_path):
     (tmp_path / "character_sheet_cocholate.png").write_bytes(b"main-sheet")
     (tmp_path / "character_sheet_pip.png").write_bytes(b"pip-sheet")
 
-    class FakeCtx:
-        assets_dir = tmp_path
+    from types import SimpleNamespace
+
+    ctx = SimpleNamespace(assets_dir=tmp_path, pack=SimpleNamespace(), _character_ref_cache={})
 
     page = PageSpec(id="p1", index=1, prompt="x", characters=["cocholate"])
-    refs = _load_page_references(FakeCtx(), page)
+    refs = _load_page_references(ctx, page)
     assert len(refs) == 1
     assert refs[0] == b"main-sheet"
 
     page = PageSpec(id="p2", index=2, prompt="x", characters=["cocholate", "pip"])
-    refs = _load_page_references(FakeCtx(), page)
+    refs = _load_page_references(ctx, page)
     assert len(refs) == 2
 
     (tmp_path / "character_sheet_pip.png").unlink()
+    ctx._character_ref_cache = {}
     page = PageSpec(id="p3", index=3, prompt="x", characters=["pip"])
     with pytest.raises(RuntimeError, match="character sheet missing"):
-        _load_page_references(FakeCtx(), page)
+        _load_page_references(ctx, page)
 
 
 def test_page_prompt_contains_canonical_characters_and_style():

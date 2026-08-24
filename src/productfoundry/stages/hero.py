@@ -1,14 +1,10 @@
 """hero stage — generate the cover hero artwork.
 
-Produces a SINGLE cover-quality image (English copy) shared by every
-language output: the artwork is generated once by the image model with the
-exact localized (English) title, subtitle, series, age badge and author
-embedded inside a clearly separated text zone. The vision judge verifies the
-copy letter by letter (including accents) and the stage retries with
-corrections until the copy is exact or attempts are exhausted.
-
-The same image is reused for every language package: the cover is not
-re-generated per language (cost/benefit: one spectacular cover, not two).
+For every language in the request we generate (or refresh) a localized cover
+hero image with the exact title, subtitle, series, age badge and author
+embedded by the image model. The vision judge verifies the copy letter by
+letter (including accents) and the stage retries with corrections until the
+copy is exact or attempts are exhausted.
 """
 from __future__ import annotations
 
@@ -18,15 +14,15 @@ from typing import ClassVar
 
 from productfoundry.domain.assets import AssetPlan, AssetSpec
 from productfoundry.domain.product import ProductPlan
+from productfoundry.engine.cost_tracking import estimate_image_cost
 from productfoundry.engine.pipeline import Stage, StageContext
 from productfoundry.packaging import localized_age_label
 from productfoundry.providers import ImageGenerationRequest
-from productfoundry.providers.pricing import image_cost_usd
 from productfoundry.series import canonical_character_reference
 from productfoundry.stages.audit import _audit_single_image, _is_audit_enabled
 from productfoundry.stages.story_helpers import localized_series_name
 
-PROMPT_VERSION = "hero-v4"
+PROMPT_VERSION = "hero-v5"
 
 
 def _get_author(pack) -> str:
@@ -48,7 +44,7 @@ def _official_palette(pack) -> str:
 
 
 def _build_hero_prompt(plan: ProductPlan, pack, language: str = "en", story_id: str = "") -> str:
-    """Prompt for the single shared cover artwork (English copy embedded)."""
+    """Prompt for the localized cover hero artwork (copy embedded in the language)."""
     title = plan.titles.get(language) or plan.titles.get("en") or plan.theme.capitalize()
     age_badge = localized_age_label(language, getattr(pack.profile, "age_range", "") or "")
     author = _get_author(pack)
@@ -110,24 +106,21 @@ def generate_hero(
     image_provider,
     image_size: str,
     out_path: Path,
-    on_cost: Callable[[str, str], None] | None = None,
+    on_cost: Callable[[str, str, dict], None] | None = None,
     reference_images: list[bytes] | None = None,
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not out_path.exists():
-        out_path.write_bytes(
-            image_provider.generate(
-                ImageGenerationRequest(
-                    prompt=prompt,
-                    aspect_ratio="1:1",
-                    size=image_size,
-                    quality="high",
-                    reference_images=reference_images,
-                )
-            )
+        request = ImageGenerationRequest(
+            prompt=prompt,
+            aspect_ratio="1:1",
+            size=image_size,
+            quality="high",
+            reference_images=reference_images,
         )
+        out_path.write_bytes(image_provider.generate(request))
         if on_cost is not None:
-            on_cost(image_size, "high")
+            on_cost(image_size, "high", getattr(request, "usage", None) or {})
     return out_path
 
 
@@ -141,8 +134,10 @@ class HeroStage(Stage):
     max_attempts = 3
 
     def output_files(self, ctx: StageContext) -> list[Path]:
-        # ONE shared artwork for every language output (English copy embedded).
-        return [ctx.assets_dir / "cover_hero.png"]
+        return [
+            ctx.assets_dir / f"cover_hero_{lang}.png"
+            for lang in (ctx.request.languages or ["en"])
+        ]
 
     def expected_output_files(self, ctx: StageContext) -> list[Path] | None:
         return self.output_files(ctx)
@@ -168,8 +163,7 @@ class HeroStage(Stage):
             hashes.append(hashlib.sha256(legacy.read_bytes()).hexdigest()[:16])
         return hashes
 
-    def _expected_copy(self, ctx: StageContext, concept: ProductPlan) -> dict[str, str]:
-        language = "en"
+    def _expected_copy(self, ctx: StageContext, concept: ProductPlan, language: str) -> dict[str, str]:
         age_badge = localized_age_label(language, getattr(ctx.pack.profile, "age_range", "") or "")
         return {
             "expected_title": concept.titles.get(language, concept.titles.get("en", ctx.request.theme)),
@@ -196,53 +190,63 @@ class HeroStage(Stage):
                 refs.append(legacy.read_bytes())
         return refs
 
+    def _hero_path(self, assets_dir: Path, language: str) -> Path:
+        return assets_dir / f"cover_hero_{language}.png"
+
     def run(self, ctx: StageContext, concept: ProductPlan) -> AssetPlan:
         gen_size = ctx.pack.profile.image_size
         refs = self._reference_images(ctx)
-
-        hero_path = ctx.assets_dir / "cover_hero.png"
-        prompt = _build_hero_prompt(concept, ctx.pack, "en", ctx.request.story_id)
-        if not hero_path.exists():
-            generate_hero(
-                prompt, ctx.image_provider, gen_size, hero_path,
-                reference_images=refs,
-                on_cost=lambda size, quality: ctx.set_cost(
-                    image_cost_usd(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality)
-                ),
+        assets: list[AssetSpec] = []
+        for language in (ctx.request.languages or ["en"]):
+            hero_path = self._hero_path(ctx.assets_dir, language)
+            prompt = _build_hero_prompt(concept, ctx.pack, language, ctx.request.story_id)
+            if not hero_path.exists():
+                generate_hero(
+                    prompt, ctx.image_provider, gen_size, hero_path,
+                    reference_images=refs,
+                    on_cost=lambda size, quality, usage: ctx.set_cost(
+                        estimate_image_cost(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality, usage)
+                    ),
+                )
+            expected = self._expected_copy(ctx, concept, language)
+            spec = AssetSpec(
+                id=f"cover_hero_{language}",
+                page_id=f"cover_hero_{language}",
+                prompt=prompt,
+                aspect_ratio="1:1",
+                size=gen_size,
+                quality="high",
+                expected_title=expected["expected_title"],
+                expected_subtitle=expected["expected_subtitle"],
+                expected_age_badge=expected["expected_age_badge"],
+                expected_author=expected["expected_author"],
             )
-        expected = self._expected_copy(ctx, concept)
-        spec = AssetSpec(
-            id="cover_hero", page_id="cover_hero", prompt=prompt,
-            aspect_ratio="1:1", size=gen_size, quality="high",
-            expected_title=expected["expected_title"],
-            expected_subtitle=expected["expected_subtitle"],
-            expected_age_badge=expected["expected_age_badge"],
-            expected_author=expected["expected_author"],
-        )
-        if not _is_audit_enabled(ctx.pack):
-            spec.audit_status = "ok"
-            spec.audit_notes = "audit disabled"
-            return AssetPlan(assets=[spec])
-        verdict = _audit_single_image(ctx, spec, hero_path, hero_mode=True)
-        attempt = 1
-        while verdict.status != "ok" and attempt < self.max_attempts:
-            suggestion = (verdict.rewrite_suggestion or verdict.notes or "").strip()
-            if suggestion:
-                spec.prompt = f"{spec.prompt}. Correction: {suggestion}"
-            hero_path.unlink()
-            generate_hero(
-                spec.prompt, ctx.image_provider, gen_size, hero_path,
-                reference_images=refs,
-                on_cost=lambda size, quality: ctx.set_cost(
-                    image_cost_usd(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality)
-                ),
-            )
+            if not _is_audit_enabled(ctx.pack):
+                spec.audit_status = "ok"
+                spec.audit_notes = "audit disabled"
+                assets.append(spec)
+                continue
             verdict = _audit_single_image(ctx, spec, hero_path, hero_mode=True)
-            attempt += 1
-        if verdict.status != "ok":
-            raise RuntimeError(
-                f"cover hero failed the judge after {attempt} attempt(s): {verdict.notes}"
-            )
-        spec.audit_status = verdict.status
-        spec.audit_notes = verdict.notes
-        return AssetPlan(assets=[spec])
+            attempt = 1
+            while verdict.status != "ok" and attempt < self.max_attempts:
+                suggestion = (verdict.rewrite_suggestion or verdict.notes or "").strip()
+                if suggestion:
+                    spec.prompt = f"{spec.prompt}. Correction: {suggestion}"
+                hero_path.unlink()
+                generate_hero(
+                    spec.prompt, ctx.image_provider, gen_size, hero_path,
+                    reference_images=refs,
+                    on_cost=lambda size, quality, usage: ctx.set_cost(
+                        estimate_image_cost(ctx.runtime.image.provider, ctx.runtime.image.model, size, quality, usage)
+                    ),
+                )
+                verdict = _audit_single_image(ctx, spec, hero_path, hero_mode=True)
+                attempt += 1
+            if verdict.status != "ok":
+                raise RuntimeError(
+                    f"cover hero[{language}] failed the judge after {attempt} attempt(s): {verdict.notes}"
+                )
+            spec.audit_status = verdict.status
+            spec.audit_notes = verdict.notes
+            assets.append(spec)
+        return AssetPlan(assets=assets)

@@ -52,6 +52,8 @@ def _check_interior_dimensions_pypdf(interior_pdf: Path) -> tuple[float, float, 
     except ImportError:
         return None
     reader = PdfReader(str(interior_pdf))
+    if not reader.pages:
+        return (0.0, 0.0, 0)
     page = reader.pages[0]
     box = page.mediabox
     width_pt = float(box.width)
@@ -75,35 +77,46 @@ def _check_interior_dimensions(
             0.0,
         )
     try:
-        result = _check_interior_dimensions_pypdf(interior_pdf)
+        from pypdf import PdfReader
+        reader = PdfReader(str(interior_pdf))
+    except ImportError:
+        return (
+            PrintCheckResult(
+                criterion="interior_dimensions",
+                status="FAIL",
+                detail="pypdf not installed; install pypdf to enable this check",
+            ),
+            0.0,
+            0.0,
+        )
     except (OSError, ValueError) as e:
         return (
             PrintCheckResult(criterion="interior_dimensions", status="FAIL", detail=f"pypdf error: {e}"),
             0.0,
             0.0,
         )
-    if result is None:
-        # Fall back to assuming the PDF is well-formed: we can't read dims
+    if not reader.pages:
         return (
-            PrintCheckResult(
-                criterion="interior_dimensions",
-                status="WARN",
-                detail="pypdf not installed; install pypdf to enable this check",
-            ),
+            PrintCheckResult(criterion="interior_dimensions", status="FAIL", detail="empty PDF"),
             0.0,
             0.0,
         )
-    actual_w_in, actual_h_in, _pages = result
     expected_w_in = trim_w_in + 2 * bleed_in
     expected_h_in = trim_h_in + 2 * bleed_in
-    width_ok = abs(actual_w_in - expected_w_in) <= tolerance_in
-    height_ok = abs(actual_h_in - expected_h_in) <= tolerance_in
-    if width_ok and height_ok:
+    bad = []
+    actual_w_in = actual_h_in = 0.0
+    for page in reader.pages:
+        box = page.mediabox
+        actual_w_in = float(box.width) / 72.0
+        actual_h_in = float(box.height) / 72.0
+        if abs(actual_w_in - expected_w_in) > tolerance_in or abs(actual_h_in - expected_h_in) > tolerance_in:
+            bad.append(f"{actual_w_in:.3f}x{actual_h_in:.3f}")
+    if bad:
         return (
             PrintCheckResult(
                 criterion="interior_dimensions",
-                status="PASS",
-                detail=f"all pages {actual_w_in:.3f}x{actual_h_in:.3f}in (expected {expected_w_in:.3f}x{expected_h_in:.3f}in)",
+                status="FAIL",
+                detail=f"{len(bad)} page(s) outside {expected_w_in:.3f}x{expected_h_in:.3f}in: {bad[:3]}",
             ),
             actual_w_in,
             actual_h_in,
@@ -111,8 +124,8 @@ def _check_interior_dimensions(
     return (
         PrintCheckResult(
             criterion="interior_dimensions",
-            status="FAIL",
-            detail=f"expected {expected_w_in:.3f}x{expected_h_in:.3f}in, got {actual_w_in:.3f}x{actual_h_in:.3f}in",
+            status="PASS",
+            detail=f"all {len(reader.pages)} pages {actual_w_in:.3f}x{actual_h_in:.3f}in",
         ),
         actual_w_in,
         actual_h_in,
@@ -168,20 +181,20 @@ def _check_interior_dpi_from_pdf(
             line_count = 0
             min_w = 1e9
             min_h = 1e9
+            # `pdfimages -list` columns: page num, num, type, width, height, ...
+            # poppler-utils places width at index 3 and height at index 4.
             for line in result.stdout.splitlines()[2:]:
                 parts = line.split()
                 if len(parts) >= 7:
                     try:
-                        w = int(parts[2])
-                        h = int(parts[3])
+                        w = int(parts[3])
+                        h = int(parts[4])
                         min_w = min(min_w, w)
                         min_h = min(min_h, h)
                         line_count += 1
                     except (ValueError, IndexError):
                         pass
             if line_count > 0 and min_w > 0 and min_h > 0:
-                # The page is 300 DPI: image width = page_w_in * 300
-                # min DPI = min_w / page_w_in
                 page_w_in = (trim_w_in + 2 * bleed_in) if trim_w_in > 0 else 8.5
                 page_h_in = (trim_h_in + 2 * bleed_in) if trim_h_in > 0 else 8.5
                 dpi_w = min_w / page_w_in
@@ -205,8 +218,9 @@ def _check_interior_dpi_from_pdf(
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
-    # Without pdfimages: check page size in inches matches expected,
-    # which is the geometric check that 300 DPI placement was honored.
+    # Without pdfimages: the geometric check is enough to confirm layout, but
+    # actual DPI cannot be verified. Fail-closed: a 300-DPI assumption cannot
+    # allow a low-resolution PDF through the release gate.
     page_w_in = (trim_w_in + 2 * bleed_in) if trim_w_in > 0 else 8.5
     if not reader.pages:
         return (
@@ -221,10 +235,10 @@ def _check_interior_dpi_from_pdf(
     if abs(actual_w_in - expected_w_in) <= 0.02 and abs(actual_h_in - expected_h_in) <= 0.02:
         return (
             PrintCheckResult(
-                criterion="interior_dpi", status="WARN",
-                detail=f"page size matches expected {expected_w_in:.3f}x{expected_h_in:.3f}in but actual DPI unverified (pdfimages not available); assuming 300 DPI",
+                criterion="interior_dpi", status="FAIL",
+                detail="pdfimages not available; cannot verify 300 DPI placement",
             ),
-            300.0,
+            0.0,
         )
     return (
         PrintCheckResult(
@@ -573,13 +587,22 @@ class PrintCheckStage(Stage):
         else:
             results.append(PrintCheckResult(criterion="wrap_cover", status="FAIL", detail="no wrap cover PNG found"))
 
-        # 3. Color mode (interior first page)
+        # 3. Color mode for every interior page and every wrap cover.
         if page_assets:
-            results.append(_check_color_mode(page_assets[0]))
+            for page in page_assets:
+                results.append(_check_color_mode(page))
         else:
             results.append(PrintCheckResult(criterion="color_mode", status="FAIL", detail="no images"))
+        for wrap in wrap_pngs:
+            results.append(_check_color_mode(wrap))
 
-        verdict = "pass" if all(r.status in ("PASS", "WARN") for r in results) else "fail"
+        # 4. Valid page count per interior PDF (already covered by
+        # _check_page_count, but we also want a strict, per-PDF report so a
+        # truncated PDF cannot hide behind another valid PDF).
+        for pdf in interior_pdfs:
+            results.append(_check_page_count(pdf, page_count))
+
+        verdict = "pass" if all(r.status == "PASS" for r in results) else "fail"
 
         return PrintCheckReport(
             verdict=verdict,

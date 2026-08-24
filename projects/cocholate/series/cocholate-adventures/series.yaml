@@ -6,7 +6,15 @@ series:
     es: "Las Aventuras de Cocholate"
   franchise: cocholate
   characters:
-    - cocholate
-    - pip
-    - pebble
-    - clover
+    cocholate:
+      reference_image: cocholate.png
+      definition_hash: "5d55ad516804ae8101b927e387fef0f16663d30bc09e1beda93ebbd2ce725c8c"
+    pip:
+      reference_image: pip.png
+      definition_hash: "467b51891e52125bce2caad212dad3311631bd26b95aa1f0189c597f7d8fb8a6"
+    pebble:
+      reference_image: pebble.png
+      definition_hash: "b4163453282826f4b69324d5eff07f8226a1c7bd202301b5cf9a307c99d77550"
+    clover:
+      reference_image: clover.png
+      definition_hash: "57b8816190d908d908557e30e0bb66bf3149071f56ba3db2c06f363bd28d9368"

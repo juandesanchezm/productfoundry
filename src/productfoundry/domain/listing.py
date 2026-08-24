@@ -1,10 +1,11 @@
-"""Listing — SEO metadata per marketplace and language."""
+"""Listing — SEO metadata per marketplace, format and language."""
 from pydantic import BaseModel, Field
 
 
 class Listing(BaseModel):
     marketplace: str
     language: str
+    format: str = ""  # "digital" | "print"
     title: str = ""
     description: str = ""
     tags: list[str] = Field(default_factory=list)
