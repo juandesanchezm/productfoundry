@@ -95,8 +95,8 @@ class OpenAIImageProvider(ImageProvider):
         self,
         api_key: str,
         model: str = "gpt-image-2",
-        timeout: float = 120.0,
-        max_retries: int = 1,
+        timeout: float = 1200.0,
+        max_retries: int = 0,
     ) -> None:
         self.api_key = api_key
         self.model = model

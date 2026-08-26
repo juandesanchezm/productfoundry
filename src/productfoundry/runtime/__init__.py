@@ -35,6 +35,7 @@ class ProviderConfig(BaseModel):
     api_key_env: str = ""
     base_url: str = ""
     quality: str = ""  # legacy single quality (overridden by artifact policies)
+    timeout: float | None = None
     extra: dict = Field(default_factory=dict)
 
 

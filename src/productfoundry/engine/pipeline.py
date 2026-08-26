@@ -85,6 +85,7 @@ def build_image_provider(runtime: RuntimeProfile) -> ImageProvider:
         return OpenAIImageProvider(
             api_key=os.getenv(runtime.image.api_key_env or "OPENAI_API_KEY", ""),
             model=runtime.image.model,
+            timeout=runtime.image.timeout or 600.0,
         )
     if runtime.image.provider == "placeholder":
         from productfoundry.providers.image import PlaceholderImageProvider
