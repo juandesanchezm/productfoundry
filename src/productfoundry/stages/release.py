@@ -22,9 +22,10 @@ from productfoundry.domain.product import ProductPlan
 from productfoundry.engine.hashing import sha256_text
 from productfoundry.engine.pipeline import Stage, StageContext
 
-PROMPT_VERSION = "release-v2"
+PROMPT_VERSION = "release-v3"
 
 APPROVAL_MARKER = ".release_approved"
+APPROVAL_REQUEST = "requested"
 
 
 class ReleaseReport(BaseModel):
@@ -140,7 +141,9 @@ class ReleaseStage(Stage):
         marker = ctx.project_dir / APPROVAL_MARKER
         marker_content = marker.read_text().strip() if marker.exists() else ""
         # Marker format: "<fingerprint>\napproved" — the fingerprint part binds
-        # the approval to the current deliverables.
+        # the approval to the current deliverables. A marker containing only
+        # "requested" is a fresh human approval request written by
+        # `release --approve`: bind it to the fingerprint computed in this run.
         marker_fingerprint = ""
         marker_approved = False
         for line in marker_content.splitlines():
@@ -148,6 +151,9 @@ class ReleaseStage(Stage):
                 marker_fingerprint = line.split(":", 1)[1].strip()
             elif line == "approved":
                 marker_approved = True
+        if marker_content == APPROVAL_REQUEST:
+            marker_approved = True
+            marker_fingerprint = fingerprint
         human_approved = marker_approved and marker_fingerprint == fingerprint
         if marker.exists() and not human_approved:
             marker.unlink()
@@ -164,6 +170,10 @@ class ReleaseStage(Stage):
                 f"fingerprint:{fingerprint}\napproved\n",
                 encoding="utf-8",
             )
+        elif marker_content == APPROVAL_REQUEST and not publishable:
+            # The approval request could not be consumed (a gate failed):
+            # remove it so a later run requires a fresh explicit approval.
+            marker.unlink()
 
         return ReleaseReport(
             verdict="pass" if publishable else "fail",

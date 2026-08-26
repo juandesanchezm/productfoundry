@@ -255,8 +255,8 @@ def test_lineart_rejects_wrong_size(tmp_path):
 def test_lineart_passes_clean_binary(tmp_path):
     p = tmp_path / "page_001.png"
     im = Image.new("L", (2550, 3300), 255)
-    for x in range(128, 2422, 4):
-        for y in range(165, 3135, 4):
+    for x in range(135, 2416, 4):
+        for y in range(170, 3130, 4):
             im.putpixel((x, y), 0)
     im.save(p)
     assert _check_image(p, 2550, 3300).status == "pass"
@@ -274,6 +274,35 @@ def test_lineart_rejects_ink_inside_trim_margin(tmp_path):
 
     assert result.status == "fail"
     assert "margin" in result.detail
+
+
+def test_lineart_rejects_frame_at_safe_margin_boundary(tmp_path):
+    from PIL import ImageDraw
+
+    from productfoundry.stages.lineart_check import _has_frame_line
+
+    im = Image.new("L", (2550, 3300), 255)
+    draw = ImageDraw.Draw(im)
+    for y in (165, 3134):
+        draw.line([(0, y), (2550, y)], fill=0, width=2)
+    for x in (127, 2422):
+        draw.line([(x, 0), (x, 3300)], fill=0, width=2)
+
+    assert _has_frame_line(im, 2550, 3300) is True
+
+    p = tmp_path / "page_001.png"
+    im.save(p)
+    assert _check_image(p, 2550, 3300).status == "fail"
+
+
+def test_lineart_does_not_flag_interior_horizon_line(tmp_path):
+    from PIL import ImageDraw
+
+    from productfoundry.stages.lineart_check import _has_frame_line
+
+    im = Image.new("L", (2550, 3300), 255)
+    ImageDraw.Draw(im).line([(0, 1650), (2550, 1650)], fill=0, width=2)
+    assert _has_frame_line(im, 2550, 3300) is False
 
 
 # ---------------------------------------------------------------- cache hash
@@ -300,6 +329,91 @@ def test_design_hash_changes_with_roster():
 
 
 # ---------------------------------------------------------------- manifest
+
+def _release_ctx(tmp_path, pack=None):
+    """Fake StageContext for ReleaseStage.run with all gates passing."""
+    from types import SimpleNamespace as _SN
+
+    from productfoundry.stages.release import ReleaseStage
+
+    _pack = pack
+    (tmp_path / "packages" / "en").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "listings").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "packages" / "en" / "book.pdf").write_bytes(b"pdf-bytes")
+    (tmp_path / "listings" / "kdp-print-en.json").write_text('{"title": "x"}')
+
+    class _FakeArtifact:
+        def __init__(self, verdict):
+            self.artifact = {"verdict": verdict}
+
+    class _FakeCtx:
+        project_dir = tmp_path
+        product_id = "test-product"
+        packages_dir = tmp_path / "packages"
+        listings_dir = tmp_path / "listings"
+        pack = _pack or _catalog_pack()
+        runtime = _SN(
+            image=_SN(provider="openai"),
+            llm=_SN(provider="ollama"),
+        )
+
+        def get_artifact(self, name):
+            return _FakeArtifact("pass")
+
+    return _FakeCtx(), ReleaseStage()
+
+
+def test_release_stage_requires_approval_marker(tmp_path):
+    ctx, stage = _release_ctx(tmp_path)
+    report = stage.run(ctx)
+    assert report.publishable is False
+    assert report.human_release_approved is False
+    assert not (tmp_path / ".release_approved").exists()
+
+
+def test_release_stage_honors_approval_request(tmp_path):
+    from productfoundry.stages.release import APPROVAL_MARKER, APPROVAL_REQUEST
+
+    ctx, stage = _release_ctx(tmp_path)
+    marker = tmp_path / APPROVAL_MARKER
+    marker.write_text(APPROVAL_REQUEST + "\n", encoding="utf-8")
+
+    report = stage.run(ctx)
+
+    assert report.publishable is True
+    assert report.human_release_approved is True
+    content = marker.read_text()
+    assert "approved" in content
+    assert f"fingerprint:{report.deliverables_fingerprint}" in content
+
+
+def test_release_stage_rejects_stale_fingerprint(tmp_path):
+    from productfoundry.stages.release import APPROVAL_MARKER
+
+    ctx, stage = _release_ctx(tmp_path)
+    marker = tmp_path / APPROVAL_MARKER
+    marker.write_text("fingerprint:deadbeef\napproved\n", encoding="utf-8")
+
+    report = stage.run(ctx)
+
+    assert report.publishable is False
+    assert report.human_release_approved is False
+    assert not marker.exists()
+
+
+def test_release_stage_removes_unconsumable_request(tmp_path):
+    from productfoundry.stages.release import APPROVAL_MARKER, APPROVAL_REQUEST
+
+    ctx, stage = _release_ctx(tmp_path)
+    marker = tmp_path / APPROVAL_MARKER
+    marker.write_text(APPROVAL_REQUEST + "\n", encoding="utf-8")
+    ctx.get_artifact = lambda name: type("A", (), {"artifact": {"verdict": "fail"}})()
+
+    report = stage.run(ctx)
+
+    assert report.publishable is False
+    assert not marker.exists()
+
 
 def test_manifest_publishable_requires_human_approval(tmp_path):
     m = PublicationManifest(product_id="p", pack_id="pack", pack_version=1)
@@ -612,6 +726,30 @@ def test_image_judge_retries_parse_failure_without_regenerating_image():
     result = _complete_with_image_json(FakeContext(), "system", "user", "image", "model")
 
     assert result == {"status": "ok"}
+
+
+def test_image_audit_injects_pack_declared_fail_on_criteria():
+    from types import SimpleNamespace as _SN
+
+    from productfoundry.stages.audit import _image_fail_on
+
+    pack = _catalog_pack()
+    criteria = _image_fail_on(pack)
+    assert "extra limbs" in criteria
+    assert "subject cropped" in criteria
+    assert "MUST return fail" in criteria
+
+    empty_pack = _SN(audit={"audit": {"image": {}}})
+    assert _image_fail_on(empty_pack) == ""
+
+    missing_pack = _SN()
+    assert _image_fail_on(missing_pack) == ""
+
+
+def test_image_audit_prompt_contains_fail_on_placeholder():
+    from productfoundry.stages.audit import IMAGE_USER_TEMPLATE
+
+    assert "{fail_on}" in IMAGE_USER_TEMPLATE
 
 
 def test_prompt_audit_retries_after_judge_rewrite():
@@ -936,6 +1074,46 @@ def test_listing_policy_adds_ai_disclosure_and_caps_etsy_tags():
 
 
 # --------------------------------------------------------------- postprocess aspect ratio
+
+def test_postprocess_strips_model_drawn_edge_frame(tmp_path):
+    from PIL import ImageDraw
+
+    from productfoundry.stages.postprocess import to_grayscale_and_threshold
+
+    src = tmp_path / "raw.png"
+    im = Image.new("L", (200, 260), 255)
+    draw = ImageDraw.Draw(im)
+    draw.rectangle([0, 0, 199, 259], outline=0, width=1)
+    draw.ellipse((50, 60, 150, 200), outline=0, width=2)
+    im.save(src)
+    dst = tmp_path / "processed.png"
+
+    to_grayscale_and_threshold(src, dst, target_inches=1.0, target_height_inches=1.0)
+
+    with Image.open(dst) as proc:
+        bbox = proc.convert("L").point(lambda p: 255 if p == 0 else 0).getbbox()
+        assert bbox is not None
+        assert bbox[0] > 10
+        assert bbox[1] > 10
+
+
+def test_postprocess_keeps_artwork_touching_edge(tmp_path):
+    from PIL import ImageDraw
+
+    from productfoundry.stages.postprocess import to_grayscale_and_threshold
+
+    src = tmp_path / "raw.png"
+    im = Image.new("L", (200, 260), 255)
+    ImageDraw.Draw(im).ellipse((0, 60, 150, 200), outline=0, width=2)
+    im.save(src)
+    dst = tmp_path / "processed.png"
+
+    to_grayscale_and_threshold(src, dst, target_inches=1.0, target_height_inches=1.0)
+
+    with Image.open(dst) as proc:
+        bbox = proc.convert("L").point(lambda p: 255 if p == 0 else 0).getbbox()
+        assert bbox is not None
+
 
 def test_postprocess_preserves_aspect_ratio(tmp_path):
     from PIL import Image

@@ -17,8 +17,57 @@ from productfoundry.domain.assets import AssetPlan
 from productfoundry.engine.hashing import sha256_files
 from productfoundry.engine.pipeline import Stage, StageContext
 
-PROMPT_VERSION = "postprocess-v4"
+PROMPT_VERSION = "postprocess-v5"
 INK_MARGIN_RATIO = 0.05
+
+
+FRAME_EDGE_DARK_RATIO = 0.90
+FRAME_ADJACENT_LIGHT_RATIO = 0.10
+FRAME_MAX_STRIP_PX = 3
+
+
+def _trim_edge_frame(bw: Image.Image) -> Image.Image:
+    """Strip a thin full-edge frame the model sometimes draws around the image.
+
+    Diffusion models occasionally wrap the artwork in a 1-3px border even when
+    the prompt forbids it. Such a border makes the ink bbox cover the whole
+    image, so the frame survives into the processed page as a visible rectangle
+    at the safe-margin boundary. Detect it deterministically: an edge row/col
+    that is overwhelmingly dark while its inward neighbor is mostly white is a
+    frame line, not artwork — crop it before computing the ink bbox.
+    """
+    w, h = bw.size
+    pixels = bw.load()
+
+    def _line_is_frame(coord: int, horizontal: bool) -> bool:
+        if horizontal:
+            line = [pixels[c, coord] for c in range(w)]
+            adj = coord + 1 if coord < h - 1 else coord - 1
+            neighbor = [pixels[c, adj] for c in range(w)]
+        else:
+            line = [pixels[coord, r] for r in range(h)]
+            adj = coord + 1 if coord < w - 1 else coord - 1
+            neighbor = [pixels[adj, r] for r in range(h)]
+        dark = sum(1 for p in line if p < 128) / len(line)
+        light = sum(1 for p in neighbor if p > 127) / len(neighbor)
+        return dark >= FRAME_EDGE_DARK_RATIO and light >= FRAME_ADJACENT_LIGHT_RATIO
+
+    top = 0
+    while top < h - 1 and top < FRAME_MAX_STRIP_PX and _line_is_frame(top, horizontal=True):
+        top += 1
+    bottom = h - 1
+    while bottom > top and h - 1 - bottom < FRAME_MAX_STRIP_PX and _line_is_frame(bottom, horizontal=True):
+        bottom -= 1
+    left = 0
+    while left < w - 1 and left < FRAME_MAX_STRIP_PX and _line_is_frame(left, horizontal=False):
+        left += 1
+    right = w - 1
+    while right > left and w - 1 - right < FRAME_MAX_STRIP_PX and _line_is_frame(right, horizontal=False):
+        right -= 1
+
+    if (top, bottom, left, right) != (0, h - 1, 0, w - 1):
+        bw = bw.crop((left, top, right + 1, bottom + 1))
+    return bw
 
 
 def to_grayscale_and_threshold(
@@ -45,6 +94,7 @@ def to_grayscale_and_threshold(
         im = ImageOps.autocontrast(im)
         bw = im.point(lambda p: 255 if p > threshold else 0)
         bw = bw.convert("L")
+        bw = _trim_edge_frame(bw)
         if target_height_inches is not None:
             target_w = round(target_inches * target_dpi)
             target_h = round(target_height_inches * target_dpi)

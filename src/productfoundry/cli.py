@@ -436,8 +436,10 @@ def release(
         typer.echo(f"error: product {product_id!r} not found", err=True)
         raise typer.Exit(1)
     if approve:
-        # The release stage recomputes the deliverables fingerprint and writes
-        # the canonical approval marker; we only request it here.
+        # Record the human approval request; the release stage binds it to the
+        # current deliverables fingerprint and writes the canonical marker.
+        marker = project_dir / APPROVAL_MARKER
+        marker.write_text("requested\n", encoding="utf-8")
         typer.echo("approval request recorded; re-running release gate")
     else:
         marker = project_dir / APPROVAL_MARKER

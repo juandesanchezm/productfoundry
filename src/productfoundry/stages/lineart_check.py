@@ -25,11 +25,13 @@ from pydantic import BaseModel, Field
 from productfoundry.domain.assets import AssetPlan
 from productfoundry.engine.pipeline import Stage, StageContext
 
-PROMPT_VERSION = "lineart-check-v2"
+PROMPT_VERSION = "lineart-check-v3"
 
 MIN_WHITE_RATIO = 0.90
 MIN_BLACK_RATIO = 0.005
 MIN_INK_MARGIN_RATIO = 0.05
+FRAME_LINE_DARK_RATIO = 0.85
+FRAME_MARGIN_RATIO = 0.07
 TARGET_INCHES = 8.0
 TARGET_DPI = 300
 
@@ -43,6 +45,29 @@ class LineArtCheckResult(BaseModel):
 class LineArtCheckReport(BaseModel):
     verdict: str = "fail"  # pass | fail
     results: list[LineArtCheckResult] = Field(default_factory=list)
+
+
+def _has_frame_line(gray: Image.Image, width: int, height: int) -> bool:
+    """Detect a border frame: straight ink lines spanning ~90% of an edge band.
+
+    A full-bleed frame the model drew around the artwork survives postprocess
+    as a rectangle right at the safe-margin boundary. Detect a horizontal or
+    vertical line that is overwhelmingly dark and lies within the outer
+    `FRAME_MARGIN_RATIO` band of the canvas. Lines in the interior (e.g. a
+    horizon) are legitimate art and do not count.
+    """
+    pixels = gray.load()
+    band_x = max(1, round(width * FRAME_MARGIN_RATIO))
+    band_y = max(1, round(height * FRAME_MARGIN_RATIO))
+    dark_limit = round(FRAME_LINE_DARK_RATIO * width)
+    for y in list(range(band_y)) + list(range(height - band_y, height)):
+        if sum(1 for x in range(width) if pixels[x, y] < 128) >= dark_limit:
+            return True
+    dark_limit = round(FRAME_LINE_DARK_RATIO * height)
+    for x in list(range(band_x)) + list(range(width - band_x, width)):
+        if sum(1 for y in range(height) if pixels[x, y] < 128) >= dark_limit:
+            return True
+    return False
 
 
 def _check_image(path: Path, target_w: int = 2400, target_h: int = 2400) -> LineArtCheckResult:
@@ -102,6 +127,12 @@ def _check_image(path: Path, target_w: int = 2400, target_h: int = 2400) -> Line
                     asset_id=path.stem,
                     status="fail",
                     detail="ink reaches the trim margin",
+                )
+            if _has_frame_line(gray, im.width, im.height):
+                return LineArtCheckResult(
+                    asset_id=path.stem,
+                    status="fail",
+                    detail="frame/border detected around the artwork",
                 )
             return LineArtCheckResult(
                 asset_id=path.stem,

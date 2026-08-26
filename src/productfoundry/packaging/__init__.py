@@ -501,7 +501,7 @@ def build_wrap_cover(
                 fill=text_color, shadow_offset=3, stroke_width=2, stroke_fill=(255, 255, 255),
             )
 
-    # ---- Back: 3 rows x 2 columns of large, centered thumbnails.
+    # ---- Back: 2 rows x 3 columns of large, centered thumbnails.
     # The grid fills the upper area and leaves the bottom ~1.5in as artwork
     # so KDP can place its ISBN barcode automatically.
     back_x0 = back_box[0]
@@ -512,12 +512,17 @@ def build_wrap_cover(
 
     thumbs = [p for p in (thumbnail_paths or []) if p.exists()][:6]
     if thumbs:
-        cols, rows = 2, 3
+        cols, rows = 3, 2
         gap_in = 0.18
         avail_w = trim_w_in - 2 * 0.5
         avail_h = grid_bottom_in - grid_top_in
         thumb_w_in = (avail_w - (cols - 1) * gap_in) / cols
-        thumb_h_in = (avail_h - (rows - 1) * gap_in) / rows
+        with Image.open(thumbs[0]) as first_thumb:
+            source_ratio = first_thumb.width / first_thumb.height
+        thumb_h_in = min(
+            thumb_w_in / source_ratio,
+            (avail_h - (rows - 1) * gap_in) / rows,
+        )
         thumb_w = _inches_to_pixels(thumb_w_in)
         thumb_h = _inches_to_pixels(thumb_h_in)
         gap = _inches_to_pixels(gap_in)
@@ -533,7 +538,21 @@ def build_wrap_cover(
             y0 = grid_y0 + row * (thumb_h + gap)
             with Image.open(tp) as im:
                 t = ImageOps_contain(im, thumb_w, thumb_h, background=bg_color)
-            canvas.paste(t, (x0, y0))
+                # Trim the uniform white padding postprocess adds so the
+                # thumbnail fills its cell with artwork instead of margins.
+                ink = t.convert("L").point(lambda p: 255 if p < 128 else 0)
+                bbox = ink.getbbox()
+                if bbox:
+                    pad = max(2, min(bbox[2] - bbox[0], bbox[3] - bbox[1]) // 30)
+                    l = max(0, bbox[0] - pad)
+                    top = max(0, bbox[1] - pad)
+                    r = min(t.width, bbox[2] + pad)
+                    bot = min(t.height, bbox[3] + pad)
+                    t = t.crop((l, top, r, bot))
+                t = ImageOps_contain(t, thumb_w, thumb_h, background=bg_color)
+            cx = x0 + thumb_w // 2
+            cy = y0 + thumb_h // 2
+            canvas.paste(t, (cx - t.width // 2, cy - t.height // 2))
             draw.rectangle([x0, y0, x0 + thumb_w, y0 + thumb_h], outline=(200, 200, 200), width=2)
 
     canvas.save(out_path, "PNG", optimize=True)

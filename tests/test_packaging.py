@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from PIL import Image, ImageStat
+from PIL import Image, ImageDraw, ImageStat
 
 from productfoundry.packaging import ImageOps_contain, build_wrap_cover, localized_age_label
 from productfoundry.stages.story_helpers import localized_series_name
@@ -125,8 +125,8 @@ def test_wrap_cover_front_overlay_uses_translucent_panel_not_opaque_box(tmp_path
         assert stat.mean[1] < 160  # green stays low (red base)
 
 
-def test_wrap_cover_back_renders_two_by_three_thumbnail_grid(tmp_path):
-    # 6 thumbnails → grid 3 rows x 2 columns, centered, filling the back
+def test_wrap_cover_back_renders_three_by_two_thumbnail_grid(tmp_path):
+    # 6 thumbnails -> grid 2 rows x 3 columns, centered, filling the back
     thumbs = []
     for i, c in enumerate((30, 70, 110, 150, 190, 230)):
         p = tmp_path / f"thumb_{i}.png"
@@ -167,6 +167,43 @@ def test_wrap_cover_back_renders_two_by_three_thumbnail_grid(tmp_path):
                 if px[0] != 255 or px[1] != 255 or px[2] != 255:
                     nonwhite += 1
         assert nonwhite > 2000
+
+
+def test_wrap_cover_portrait_thumbnails_preserve_full_content(tmp_path):
+    thumbnail = tmp_path / "portrait.png"
+    source = Image.new("RGB", (60, 100), "white")
+    ImageDraw.Draw(source).rectangle((10, 10, 50, 90), outline="black", width=3)
+    source.save(thumbnail)
+    output = tmp_path / "cover.png"
+
+    build_wrap_cover(
+        title="A Title",
+        author="An Author",
+        back_blurb="",
+        out_path=output,
+        page_count=24,
+        page_size="8.5x11",
+        thumbnail_paths=[thumbnail],
+    )
+
+    with Image.open(output) as cover:
+        bleed = round(0.125 * 300)
+        trim_width = round(8.5 * 300)
+        gap = round(0.18 * 300)
+        thumb_w = round(((8.5 - 1.0 - 2 * 0.18) / 3) * 300)
+        thumb_h = round((thumb_w / 300) / (60 / 100) * 300)
+        grid_h = 2 * thumb_h + gap
+        grid_y0 = bleed + round(0.4 * 300) + (round(9.1 * 300) - grid_h) // 2
+        cell_x0 = bleed + (trim_width - (3 * thumb_w + 2 * gap)) // 2
+        cell = cover.crop((cell_x0, grid_y0, cell_x0 + thumb_w, grid_y0 + thumb_h))
+
+        def darkest_row_count(y):
+            return sum(cell.getpixel((x, y))[0] < 80 for x in range(cell.width))
+
+        top_rows = [darkest_row_count(y) for y in range(cell.height // 10)]
+        bottom_rows = [darkest_row_count(y) for y in range(cell.height - cell.height // 10, cell.height)]
+        assert max(top_rows) > thumb_w // 4
+        assert max(bottom_rows) > thumb_w // 4
 
 
 def test_wrap_cover_back_has_no_blurb_text_or_barcode_box(tmp_path):

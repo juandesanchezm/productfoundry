@@ -61,7 +61,8 @@ class LLMClient:
         """Vision-capable completion. Sends the image as base64 to the Ollama chat endpoint.
 
         `model` overrides the default chat model so the judge can use a vision-capable one
-        (e.g. minimax-m3) even when the main chat model is text-only.
+        (e.g. minimax-m3) even when the main chat model is text-only. Vision calls carry a
+        large payload and are slower, so they get a longer timeout than text calls.
         """
         messages = [
             {"role": "system", "content": system},
@@ -73,6 +74,7 @@ class LLMClient:
             messages,
             api_key=self.api_key,
             format_json=True,
+            timeout=300.0,
         )
 
 

@@ -129,6 +129,7 @@ Detect these issues (which are common in diffusion models):
 - Image mostly blank (only background, no subject)
 - Major anatomical artifacts (faces overlapping, twisted pose)
 - Character mismatch: the main character differs from its characterization shape
+{fail_on}
 
 Image #{index}:
 """
@@ -233,6 +234,27 @@ def _is_audit_enabled(pack) -> bool:
         if isinstance(nested, dict):
             return bool(nested.get("enabled", True))
     return True
+
+
+def _image_fail_on(pack) -> str:
+    """Pack-declared hard-fail criteria from audit.yaml (`audit.image.fail_on`).
+
+    The pack declares which artifacts MUST fail the judge (extra limbs, crops,
+    blank images...). Wire them into the image-audit prompt so the declared
+    criteria are enforced instead of being dead config.
+    """
+    audit_cfg = getattr(pack, "audit", None) or {}
+    if isinstance(audit_cfg, dict):
+        nested = audit_cfg.get("audit", audit_cfg)
+        if isinstance(nested, dict):
+            fail_on = nested.get("image", {}).get("fail_on") if isinstance(nested.get("image"), dict) else None
+            if isinstance(fail_on, list) and fail_on:
+                items = "\n".join(f"- {item}" for item in fail_on)
+                return (
+                    "\nPack-declared rejection criteria (MUST return fail when any is present):\n"
+                    + items
+                )
+    return ""
 
 
 def _judge_model(pack) -> str:
@@ -419,6 +441,7 @@ def _audit_single_image(
             beat=getattr(page, "beat", "") or "unspecified",
             characters=", ".join(getattr(page, "characters", []) or []) or "unspecified",
             page_prompt=getattr(page, "prompt", "") or asset.prompt,
+            fail_on=_image_fail_on(ctx.pack),
         )
     user += '\nLook at the image. Return JSON only: {"status": "ok|warn|fail", "notes": "...", "rewrite_suggestion": "..."}'
     data = _complete_with_image_json(ctx, PROMPT_SYSTEM, user, img_b64, _judge_model(ctx.pack))
@@ -464,6 +487,7 @@ def _audit_images(ctx: StageContext, assets: AssetPlan) -> AssetAuditReport:
                 beat="",
                 characters="",
                 page_prompt=asset.prompt,
+                fail_on=_image_fail_on(ctx.pack),
             )
             + "Look at the image. Return JSON only: {\"status\": \"ok|warn|fail\", \"notes\": \"...\"}"
         )
