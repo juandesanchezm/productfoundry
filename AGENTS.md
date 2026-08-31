@@ -40,6 +40,13 @@ Runtimes: `runtime/default.yaml` (real, budget 20.0), `runtime/real.yaml` (real,
 - **Sin subtítulos**: se eliminó `subtitle_*` del pipeline (portada = título + serie + edad + autor).
 - **Entorno**: el `.env` se carga automáticamente desde la raíz del repo o cwd (`cli.py`); no hace falta exportar manualmente `OPENAI_API_KEY`/`OLLAMA_API_KEY`.
 
+## Git y push
+
+- Para publicar cambios usa la cuenta personal de GitHub `juandesanchezm` mediante SSH, nunca HTTPS con token.
+- El remoto esperado es `git@github.com:juandesanchezm/productfoundry.git`.
+- Antes de hacer push en una sesión nueva, confirma la identidad con `ssh -T git@github.com`; debe responder `Hi juandesanchezm!`.
+- Si el agente SSH no está disponible, carga el entorno de `/home/usuario/.bashrc` sin mostrar ni registrar valores secretos y vuelve a comprobar la identidad antes de ejecutar `git push origin main`.
+
 ## Pipeline (orden)
 
 `concept → audit_prompt → pack_validate → character_sheet → audit_character_sheet → assets → audit_assets → postprocess → lineart_check → hero → back_cover → package → printcheck → listing → review → release`
