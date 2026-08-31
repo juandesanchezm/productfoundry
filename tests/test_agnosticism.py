@@ -17,6 +17,8 @@ BANNED = [
     "amazon",
     "ttrpg",
     "printable game",
+    "children",
+    "child",
     # Character/niche decisions that must live in the pack, never in the engine
     "blaze",
     "pip",

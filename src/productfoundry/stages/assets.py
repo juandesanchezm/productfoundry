@@ -224,7 +224,9 @@ class AssetsStage(Stage):
             page = next((p for p in concept.pages if p.id == a.id), None)
             refs = _load_page_references(ctx, page) if page else []
             path = ctx.assets_dir / f"{a.id}.png"
-            attempt = 0
+            # The policy declares the total number of generation attempts,
+            # including the first image generated above.
+            attempt = 1
             max_attempts = len(quality_attempts) if quality_attempts else 3
 
             def _on_cost(size: str, quality: str, usage: dict[str, Any], _provider=provider, _model=model) -> None:
@@ -259,6 +261,6 @@ class AssetsStage(Stage):
             a.audit_notes = verdict.notes
             if verdict.status != "ok":
                 raise RuntimeError(
-                    f"page {a.id} failed the judge after {attempt + 1} attempt(s): {verdict.notes}"
+                    f"page {a.id} failed the judge after {attempt} attempt(s): {verdict.notes}"
                 )
         return plan

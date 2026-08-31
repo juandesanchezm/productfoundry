@@ -415,6 +415,18 @@ def test_release_stage_removes_unconsumable_request(tmp_path):
     assert not marker.exists()
 
 
+def test_release_cache_hash_uses_every_deliverable_byte(tmp_path):
+    """A same-size binary mutation must invalidate a cached approved release."""
+    ctx, stage = _release_ctx(tmp_path)
+    deliverable = ctx.packages_dir / "en" / "book.pdf"
+    deliverable.write_bytes(b"a" * 2_000_001)
+    before = stage.extra_hash_inputs(ctx)
+
+    deliverable.write_bytes(b"b" * 2_000_001)
+
+    assert stage.extra_hash_inputs(ctx) != before
+
+
 def test_manifest_publishable_requires_human_approval(tmp_path):
     m = PublicationManifest(product_id="p", pack_id="pack", pack_version=1)
     m.add_gate("review", "pass")
@@ -571,6 +583,59 @@ def test_quality_policies_default():
     assert p.image_policies.cover.attempts == ["high", "high", "high"]
 
 
+def test_assets_stage_uses_the_configured_total_attempt_count(tmp_path, monkeypatch):
+    """Three configured quality attempts permit exactly three provider calls."""
+    from types import SimpleNamespace
+
+    from productfoundry.domain.assets import AssetPlan, AssetSpec
+    from productfoundry.domain.product import PageSpec, ProductPlan
+    from productfoundry.stages import assets as assets_module
+
+    class FakeImageProvider:
+        calls = 0
+
+        def generate(self, request):
+            self.calls += 1
+            return b"image"
+
+    class FakeContext:
+        assets_dir = tmp_path
+        pack = SimpleNamespace(
+            profile=SimpleNamespace(image_size="1024x1024"),
+            stories={},
+            style={},
+        )
+        runtime = SimpleNamespace(
+            image_policies=SimpleNamespace(interior=SimpleNamespace(attempts=["low", "low", "medium"])),
+            image=SimpleNamespace(provider="placeholder", model="test"),
+        )
+        image_provider = FakeImageProvider()
+
+        def set_cost(self, amount):
+            return None
+
+    plan = ProductPlan(
+        pack_id="x",
+        pack_version=1,
+        theme="t",
+        pages=[PageSpec(id="page_001", index=1, prompt="scene", characters=["main"])],
+    )
+    asset = AssetSpec(id="page_001", page_id="page_001", prompt="scene")
+    monkeypatch.setattr(assets_module, "plan_assets", lambda *args, **kwargs: AssetPlan(assets=[asset]))
+    monkeypatch.setattr(assets_module, "_load_page_references", lambda *args: [])
+    monkeypatch.setattr(assets_module, "_is_audit_enabled", lambda pack: True)
+    monkeypatch.setattr(
+        assets_module,
+        "_audit_single_image",
+        lambda *args, **kwargs: SimpleNamespace(status="fail", notes="bad", rewrite_suggestion=""),
+    )
+
+    with pytest.raises(RuntimeError, match="after 3 attempt"):
+        assets_module.AssetsStage().run(FakeContext(), plan)
+
+    assert FakeContext.image_provider.calls == 3
+
+
 def test_hero_prompt_requires_the_exact_english_title_and_official_colors():
     from productfoundry.stages.hero import _build_hero_prompt
 
@@ -686,8 +751,8 @@ def test_prompt_audit_requires_story_variety_and_child_engagement():
     assert "story beat" in template
     assert "same order" in template
     assert "variety" in template
-    assert "child" in template
-    assert "color" in template
+    assert "configured audience" in template
+    assert "{audience}" in template
 
 
 def test_character_sheet_audit_only_enforces_declared_traits():
@@ -799,6 +864,7 @@ def test_placeholder_llm_returns_one_prompt_verdict_per_page():
     from productfoundry.stages.audit import PROMPT_USER_TEMPLATE
 
     user = PROMPT_USER_TEMPLATE.format(
+        audience="test audience",
         prompts_json=json.dumps(
             [{"id": f"page_{index:03d}", "prompt": "scene"} for index in range(1, 25)]
         )

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from productfoundry.domain.assets import AssetPlan
 from productfoundry.domain.listing import ListingSet
-from productfoundry.domain.manifest import PublicationManifest, validate_compliance
+from productfoundry.domain.manifest import PublicationManifest, sha256_file, validate_compliance
 from productfoundry.domain.packaging import PackagePlan
 from productfoundry.domain.product import ProductPlan
 from productfoundry.engine.hashing import sha256_text
@@ -63,18 +63,16 @@ class ReleaseStage(Stage):
             if env is not None:
                 import json
                 gate_hashes.append(json.dumps(env.artifact, sort_keys=True))
-        # Also include the bytes fingerprint of every deliverable so the cache
-        # cannot accept stale files.
+        # Include every deliverable's binary SHA-256 so any byte mutation
+        # invalidates the cached approval, regardless of the file's size or
+        # whether its bytes are valid UTF-8.
         deliverable_hashes = []
         for root in (ctx.packages_dir, ctx.listings_dir):
             if not root.exists():
                 continue
             for p in sorted(root.rglob("*")):
                 if p.is_file():
-                    if p.stat().st_size < 2_000_000:
-                        deliverable_hashes.append(sha256_text(p.read_text(errors="replace")))
-                    else:
-                        deliverable_hashes.append(sha256_text(p.name + ":" + str(p.stat().st_size)))
+                    deliverable_hashes.append(sha256_file(p))
         return [marker_content, "|".join(gate_hashes), "|".join(deliverable_hashes)]
 
     def expected_output_files(self, ctx: StageContext) -> list[Path] | None:

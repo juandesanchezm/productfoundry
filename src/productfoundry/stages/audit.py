@@ -6,7 +6,7 @@ Runs twice in the DAG:
     mini companion; flags fails only on 2nd large figure, hands holding
     complex objects, cropping, and missing protagonist.
   - after `assets`: audits each generated image. Anatomical checks are
-    blocking; aesthetic checks (cuteness, kid-appropriateness) are
+    blocking; aesthetic checks (appeal, audience fit) are
     informational notes and do not flip the verdict.
 
 Skip this stage (in dry-runs / fast iteration) by setting
@@ -34,12 +34,13 @@ PROMPT_VERSION = "audit-v2"
 JUDGE_MODEL = "minimax-m3"  # vision-capable, available on Ollama Cloud
 
 PROMPT_SYSTEM = (
-    "You are a strict quality auditor for printable line-art images. "
+    "You are a strict quality auditor for generated product images. "
     "You always reply with valid JSON only, no prose, no markdown fences."
 )
 
-PROMPT_USER_TEMPLATE = """You are the storytelling judge for an image generation pipeline that produces
-black-and-white line art for a children's activity book.
+PROMPT_USER_TEMPLATE = """You are the storytelling judge for a generated visual product.
+
+Configured audience: {audience}
 
 The composition rules accepted by this pipeline:
 - 1 protagonist (centered, full body visible, consistent across pages)
@@ -60,8 +61,8 @@ Also evaluate the book as a sequence, not just isolated pages:
 - The prompt must honor its story beat and expected characters.
 - The sequence must have clear variety in action, setting, camera distance, or composition;
   reject repetitive pages that would make the activity book monotonous.
-- The scene should be playful, surprising, and age-appropriate for children 3-8.
-- Include clear, large, colorable shapes and props that invite the child to participate.
+- The scene should be engaging and appropriate for the configured audience.
+- Include clear, readable subjects, shapes, and props appropriate to the product.
 - Reject a page that is technically clean but emotionally flat, confusing, or unrelated
   to its beat. Use "warn" when it is usable but needs a prompt rewrite.
 
@@ -85,7 +86,7 @@ Return JSON only:
 ]}}
 """
 
-IMAGE_USER_TEMPLATE = """Audit each generated image for a printable children's art book.
+IMAGE_USER_TEMPLATE = """Audit each generated image for the configured product.
 
 These images are BLACK-AND-WHITE LINE ART. Color is NOT present in line art,
 so never evaluate color — evaluate SHAPE and structure only: head shape and
@@ -102,15 +103,15 @@ Story context for this page:
 - Expected characters: {characters}
 - Planned scene: {page_prompt}
 
-The image must be playful and engaging for a child to color. Look for a clear
-action, a readable scene, varied composition, and inviting large shapes or props.
+The image must be engaging for the configured audience. Look for a clear
+action, a readable scene, varied composition, and appropriate shapes or props.
 Reject a technically clean image when it is bland, repetitive, disconnected from
   the beat, or offers no recognizable activity opportunity.
 
 For each image, return a JSON object with:
 - "status": "ok" | "warn" | "fail"
 - "notes": one short sentence with the issue, or "" if ok
-- "cuteness": one short sentence describing how cute/kid-appropriate the image is (e.g. "adorable proportions, friendly expression" or "too realistic, scary, not for kids")
+- "cuteness": one short sentence describing the image's audience fit (e.g. "friendly expression" or "too realistic or scary for the audience")
 - "rewrite_suggestion": ONLY if status is "warn" or "fail", a single-sentence
   rewrite of the prompt that fixes the issue. Otherwise "".
 
@@ -155,10 +156,10 @@ Return JSON only:
 {{"status": "ok|warn|fail", "notes": "one short sentence", "rewrite_suggestion": "single-sentence fix if not ok, else empty"}}
 """
 
-BACK_USER_TEMPLATE = """Audit this BACK COVER background illustration for a children's book.
+BACK_USER_TEMPLATE = """Audit this BACK COVER background illustration for the configured product.
 
 This is a FULL-COLOR illustration (NOT line art). It will receive four
-interior-page thumbnails in the upper area and KDP's ISBN barcode in the
+interior-page thumbnails in the upper area and a marketplace barcode in the
 lower area — so it must leave room for them.
 
 Audience/niche: {audience}. Reject (fail) any image that is not appropriate
@@ -180,7 +181,7 @@ Return JSON only:
 {{"status": "ok|warn|fail", "notes": "one short sentence", "rewrite_suggestion": "single-sentence fix if not ok, else empty"}}
 """
 
-HERO_USER_TEMPLATE = """Audit this cover illustration for a children's book.
+HERO_USER_TEMPLATE = """Audit this cover illustration for the configured product.
 
 This is a FULL-COLOR cover illustration (NOT line art). Evaluate color, composition,
 character identity, and text.
@@ -347,7 +348,14 @@ def _audit_prompts(ctx: StageContext, plan: ProductPlan) -> PromptAuditReport:
             }
             for p in plan.pages
         ]
+    profile = getattr(ctx.pack, "profile", None)
+    audience = (
+        getattr(profile, "audience", "")
+        or getattr(profile, "pack_type", "")
+        or "the configured audience"
+    )
     user = PROMPT_USER_TEMPLATE.format(
+        audience=audience,
         prompts_json=json.dumps(
             prompt_rows,
             ensure_ascii=False,

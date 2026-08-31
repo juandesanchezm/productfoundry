@@ -2,7 +2,7 @@
 
 Produces a SINGLE soft background shared by every language (identical
 artwork across locales). It deliberately contains NO character and NO text:
-the back cover of a children's activity book shows interior-page thumbnails
+the back cover of an activity product shows interior-page thumbnails
 and a calm area where KDP will place its ISBN barcode automatically.
 """
 from __future__ import annotations
