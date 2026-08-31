@@ -1,6 +1,7 @@
 """listing stage — generate SEO titles, descriptions, tags per marketplace and language."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import ClassVar
 
@@ -44,6 +45,39 @@ def normalize_listing(data: dict) -> Listing:
             )
         ),
     )
+
+
+_PRINT_SIZE_CLAIM = re.compile(
+    r"(?P<width>\d+(?:\.\d+)?)\s*(?:x|×)\s*(?P<height>\d+(?:\.\d+)?)\s*(?:in(?:ch(?:es)?)?\b)?",
+    re.IGNORECASE,
+)
+
+
+def validate_kdp_print_listing(listing: Listing, *, canonical_title: str, page_size: str) -> list[str]:
+    """Reject KDP print metadata that contradicts the packaged paperback."""
+    if listing.marketplace.lower() != "kdp" or listing.format.lower() != "print":
+        return []
+
+    errors: list[str] = []
+    if canonical_title and listing.title.strip() != canonical_title.strip():
+        errors.append("title must exactly match the cover title")
+
+    description = listing.description.lower()
+    if re.search(r"\b(?:single|one)[ -]sided\b", description):
+        errors.append("must not claim single-sided pages")
+
+    try:
+        expected_width, expected_height = (float(value) for value in page_size.lower().split("x", 1))
+    except ValueError:
+        return errors
+    for match in _PRINT_SIZE_CLAIM.finditer(description):
+        width = float(match.group("width"))
+        height = float(match.group("height"))
+        if (width, height) != (expected_width, expected_height):
+            errors.append(
+                f"description claims {match.group('width')} x {match.group('height')} but the print size is {page_size}"
+            )
+    return errors
 
 
 def expected_listing_keys(pack, languages: list[str], formats: list[str]) -> set[tuple[str, str, str]]:
@@ -102,6 +136,11 @@ Pista: {plan.description_hint}{series_line}
 Combinaciones obligatorias (debes cubrir TODAS):
 {combinations_block}
 
+Para cada listing `kdp / print`:
+- El campo `title` debe coincidir exactamente con el título del producto para su idioma; no añadas subtítulo, SEO ni serie.
+- El interior impreso mide {profile.page_size} pulgadas. No declares otro tamaño.
+- No afirmes que las páginas son "single-sided" ni que hay páginas reversas en blanco.
+
 Devuelve SOLO JSON:
 {{
   "listings": [
@@ -148,6 +187,20 @@ class ListingStage(Stage):
         )
 
         listings = [normalize_listing(raw_listing) for raw_listing in result.listings]
+
+        profile = getattr(ctx.pack, "profile", ctx.pack)
+        listing_errors: list[str] = []
+        for listing in listings:
+            canonical_title = concept.titles.get(listing.language, "")
+            listing_errors.extend(
+                validate_kdp_print_listing(
+                    listing,
+                    canonical_title=canonical_title,
+                    page_size=getattr(profile, "page_size", ""),
+                )
+            )
+        if listing_errors:
+            raise RuntimeError("KDP print listing validation failed: " + "; ".join(listing_errors))
 
         # Fail-closed: every (marketplace, format, language) combination
         # declared by the pack must appear in the generated listings.

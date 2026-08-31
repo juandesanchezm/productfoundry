@@ -401,9 +401,8 @@ def build_wrap_cover(
     composed deterministically with a white stroke — no opaque boxes.
     Back: one shared model-generated background (no character, no text) with
     SIX interior-page thumbnails (3 rows x 2 columns, large and centered)
-    filling the upper area; the bottom strip (1.5in) is left as artwork so
-    KDP places its ISBN barcode automatically. No blurb text and no barcode
-    box are drawn.
+    filling the upper area. A white lower-right reserve is kept clear for the
+    ISBN barcode that KDP places automatically. No blurb text is drawn.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     trim_w_in, trim_h_in = map(float, page_size.lower().split("x"))
@@ -502,8 +501,8 @@ def build_wrap_cover(
             )
 
     # ---- Back: 2 rows x 3 columns of large, centered thumbnails.
-    # The grid fills the upper area and leaves the bottom ~1.5in as artwork
-    # so KDP can place its ISBN barcode automatically.
+    # The grid fills the upper area and leaves the bottom ~1.5in clear for
+    # the barcode reserve KDP needs.
     back_x0 = back_box[0]
     back_cx = back_x0 + trim_w_px // 2
     barcode_zone_in = 1.5
@@ -554,6 +553,21 @@ def build_wrap_cover(
             cy = y0 + thumb_h // 2
             canvas.paste(t, (cx - t.width // 2, cy - t.height // 2))
             draw.rectangle([x0, y0, x0 + thumb_w, y0 + thumb_h], outline=(200, 200, 200), width=2)
+
+    # KDP adds its own 2 x 1.2in ISBN barcode at the lower right of the back
+    # cover. Reserve a slightly larger white area so generated scenery cannot
+    # be obscured or make the uploaded cover fail validation.
+    barcode_reserve_w = _inches_to_pixels(2.25)
+    barcode_reserve_h = _inches_to_pixels(1.45)
+    draw.rectangle(
+        [
+            back_box[2] - barcode_reserve_w,
+            back_box[3] - barcode_reserve_h,
+            back_box[2],
+            back_box[3],
+        ],
+        fill=(255, 255, 255),
+    )
 
     canvas.save(out_path, "PNG", optimize=True)
     return out_path

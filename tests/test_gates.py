@@ -1092,10 +1092,12 @@ def test_print_interior_is_trim_size_without_bleed(tmp_path):
     assert abs(float(page.mediabox.height) / 72.0 - 11.0) < 0.01
 
 
-def test_wrap_cover_leaves_kdp_barcode_area_as_artwork(tmp_path):
+def test_wrap_cover_reserves_a_clear_kdp_barcode_area(tmp_path):
     from productfoundry.packaging import build_wrap_cover
 
     cover = tmp_path / "cover.png"
+    back = tmp_path / "back.png"
+    Image.new("RGB", (600, 600), "lightblue").save(back)
     build_wrap_cover(
         title="A Title",
         author="Noa Bloom",
@@ -1104,19 +1106,28 @@ def test_wrap_cover_leaves_kdp_barcode_area_as_artwork(tmp_path):
         page_count=24,
         page_size="8.5x11",
         bleed_inches=0.125,
+        back_image_path=back,
     )
 
     with Image.open(cover) as image:
-        # No synthetic barcode box is drawn: KDP places the ISBN barcode on
-        # the plain background automatically. Lower back cover stays white.
-        _, height = image.size
-        back_width = round(8.5 * 300)
-        bottom = image.crop((0, height - round(0.9 * 300), back_width, height))
-        pixels = bottom.load()
+        # KDP inserts a 2 x 1.2in barcode at the lower right of the back
+        # cover. The generator reserves that area even over artwork.
+        bleed = round(0.125 * 300)
+        back_right = bleed + round(8.5 * 300)
+        back_bottom = bleed + (11 * 300)
+        barcode = image.crop(
+            (
+                back_right - round(2.25 * 300),
+                back_bottom - round(1.45 * 300),
+                back_right,
+                back_bottom,
+            )
+        )
+        pixels = barcode.load()
         assert all(
             pixels[x, y] == (255, 255, 255)
-            for x in range(bottom.width)
-            for y in range(bottom.height)
+            for x in range(barcode.width)
+            for y in range(barcode.height)
         )
 
 
@@ -1137,6 +1148,48 @@ def test_listing_policy_adds_ai_disclosure_and_caps_etsy_tags():
 
     assert len(listing.tags) == 13
     assert "AI-assisted" in listing.ai_disclosure
+
+
+def test_kdp_print_listing_requires_the_cover_title_and_true_print_claims():
+    from productfoundry.domain.listing import Listing
+    from productfoundry.stages.listing import validate_kdp_print_listing
+
+    listing = Listing(
+        marketplace="kdp",
+        language="en",
+        format="print",
+        title="A Magical Day: An SEO Subtitle",
+        description="24 single-sided coloring pages in a large 8.5 x 8.5 inch format.",
+    )
+
+    errors = validate_kdp_print_listing(
+        listing,
+        canonical_title="A Magical Day",
+        page_size="8.5x11",
+    )
+
+    assert "title must exactly match the cover title" in errors
+    assert "must not claim single-sided pages" in errors
+    assert any("8.5 x 8.5" in error for error in errors)
+
+
+def test_kdp_print_listing_accepts_matching_metadata():
+    from productfoundry.domain.listing import Listing
+    from productfoundry.stages.listing import validate_kdp_print_listing
+
+    listing = Listing(
+        marketplace="kdp",
+        language="en",
+        format="print",
+        title="A Magical Day",
+        description="24 coloring pages in a large 8.5 x 11 inch format.",
+    )
+
+    assert validate_kdp_print_listing(
+        listing,
+        canonical_title="A Magical Day",
+        page_size="8.5x11",
+    ) == []
 
 
 # --------------------------------------------------------------- postprocess aspect ratio
@@ -1272,3 +1325,5 @@ def test_listing_prompt_uses_localized_series_without_volume():
     assert "volumen 1" not in prompt
     assert "este es el volumen" not in prompt
     assert "Blaze" not in prompt
+    assert "coincidir exactamente con el título" in prompt
+    assert "single-sided" in prompt
